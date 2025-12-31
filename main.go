@@ -1,0 +1,82 @@
+package main
+
+import (
+	"context"
+	"mitosu/src/cmd"
+	"mitosu/src/logger"
+	"os"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/urfave/cli/v3"
+)
+
+func main() {
+
+	logger.Init(zerolog.InfoLevel)
+
+	cmd := &cli.Command{
+		Name: "mitosu",
+		Description: "A simple pure SSH server monitoring tool.",
+		Usage: "See through your servers at a glance",
+		Commands: []*cli.Command{
+			{
+				Name:        "stat",
+				Description: "See stats of a server",
+				Action:      cmd.CmdStat,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:     "no-color",
+						Aliases:  []string{"n"},
+						Usage:    "If true, don't color the output",
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "ssh-config",
+						Aliases:  []string{"c"},
+						Usage:    "The ssh config file path",
+						Value:    "~/.ssh/config",
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "alias",
+						Aliases:  []string{"a"},
+						Usage:    "The ssh config host alias",
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "host",
+						Aliases:  []string{"H"},
+						Usage:    "The remote host",
+						Required: false,
+					},
+					&cli.IntFlag{
+						Name:     "port",
+						Aliases:  []string{"p"},
+						Usage:    "The remote ssh port",
+						Value:    22,
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "user",
+						Aliases:  []string{"u"},
+						Usage:    "The remote user",
+						Value:    "root",
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "key",
+						Aliases:  []string{"i"},
+						Usage:    "The ssh private key file path",
+						Required: false,
+					},
+				},
+			},
+		},
+	}
+
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		log.Fatal().Err(err).Msg("")
+	}
+
+}
