@@ -40,6 +40,12 @@ func main() {
 						Usage:    "If true, don't color the output",
 						Required: false,
 					},
+					&cli.BoolFlag{
+						Name:     "with-root",
+						Aliases:  []string{"R"},
+						Usage:    "Elevate the remote shell using sudo, and prompt for a root password",
+						Required: false,
+					},
 					&cli.StringFlag{
 						Name:     "ssh-config",
 						Aliases:  []string{"c"},

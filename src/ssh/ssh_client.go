@@ -15,6 +15,7 @@ import (
 
 type SSHClient struct {
 	*gossh.Client
+	Config Section
 }
 
 func NewClient(s Section) (SSHClient, error) {
@@ -54,6 +55,7 @@ func NewClient(s Section) (SSHClient, error) {
 
 	sshClient := SSHClient{
 		Client: client,
+		Config: s,
 	}
 
 	return sshClient, err
@@ -80,9 +82,12 @@ func (s *SSHClient) RunCommand(command string) (string, error) {
 	return buf.String(), nil
 }
 
-func (s *SSHClient) RunCommands(sh shell.Shell, commands []string) ([]string, error) {
+func (s *SSHClient) RunCommands(sh shell.Shell, commands []shell.ShellCmd) ([]string, error) {
 
-	log.Debug().Strs("command", commands).Msg("Running command")
+	log.Debug().
+		Int("shell", int(sh.GetType())).
+		Interface("command", commands).
+		Msg("Running command")
 
 	session, err := s.Client.NewSession()
 
@@ -102,23 +107,48 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []string) ([]string, er
 	sep := fmt.Sprintf("[%x]\n", sepBytes)
 
 	var buf bytes.Buffer
+	var bufErr bytes.Buffer
 	session.Stdout = &buf
+	session.Stderr = &bufErr
 
-	if err := session.Start(sh.Sh()); err != nil {
-		return nil, err
+	var cmd string
+
+	if rootPw, err := sh.GetRootPassword(); err == nil {
+
+		cmd = sh.RootSh()
+		log.Debug().Str("cmd", cmd).Msg("Shell has root password, running root shell")
+
+		if err := session.Start(cmd); err != nil {
+			return nil, err
+		}
+
+		// provide the root password
+		fmt.Fprintln(stdin, rootPw)
+
+	} else {
+
+		if err != shell.ErrNoRootAccess {
+			return nil, err
+		}
+
+		cmd = sh.Sh()
+		log.Debug().Str("cmd", cmd).Msg("Running shell")
+
+		// none root shell
+		if err := session.Start(sh.Sh()); err != nil {
+			return nil, err
+		}
 	}
 
-	for _, cmd := range commands {
+	for _, shCmd := range commands {
 
-		var run string
+		cmd = sh.OrTrue(shCmd.Cmd)
+		log.Debug().Str("cmd", cmd).Msg("Running")
+		fmt.Fprintln(stdin, cmd)
 
-		run = sh.OrTrue(cmd)
-		log.Debug().Str("cmd", run).Msg("Running")
-		fmt.Fprintln(stdin, run)
-
-		run = sh.Echo(sep)
-		log.Debug().Str("cmd", run).Msg("Running")
-		fmt.Fprintln(stdin, run)
+		cmd = sh.Echo(sep)
+		log.Debug().Str("cmd", cmd).Msg("Running")
+		fmt.Fprintln(stdin, cmd)
 	}
 
 	stdin.Close()
@@ -128,6 +158,7 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []string) ([]string, er
 	}
 
 	stdout := buf.String()
+	stderr := bufErr.String()
 
 	results := strings.Split(stdout, sep)
 
@@ -135,7 +166,9 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []string) ([]string, er
 		results = results[0:len(commands)]
 	}
 
-	log.Debug().Int("len", len(results)).Strs("stdout", results).Msg("got result of commands")
+	log.Debug().Msg(stdout)
+	log.Error().Msg(stderr)
+	// log.Debug().Int("len", len(results)).Strs("stdout", results).Msg("got result of commands")
 
 	return results, nil
 }

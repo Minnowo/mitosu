@@ -4,10 +4,34 @@ import (
 	"fmt"
 )
 
-type PosixShell struct{}
+type PosixShell struct {
+	rootPassword string
+}
 
+func NewPosixShell(rootPassword string) PosixShell {
+	return PosixShell{
+		rootPassword: rootPassword,
+	}
+}
+
+func (PosixShell) GetType() ShellType {
+	return PosixShellType
+}
 func (PosixShell) Sh() string {
 	return "sh"
+}
+
+func (PosixShell) RootSh() string {
+	return "sudo -S sh"
+}
+
+func (s PosixShell) GetRootPassword() (string, error) {
+
+	if s.rootPassword != "" {
+		return s.rootPassword, nil
+	}
+
+	return "", ErrNoRootAccess
 }
 
 func (PosixShell) Echo(s string) string {

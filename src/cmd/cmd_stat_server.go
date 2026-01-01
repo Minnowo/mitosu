@@ -5,9 +5,9 @@ import (
 	"fmt"
 	cf "mitosu/src/colors"
 	"mitosu/src/data"
+	"mitosu/src/shell"
 	"mitosu/src/ssh"
 	"sort"
-	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
@@ -18,6 +18,8 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 	noColor := c.Value("no-color").(bool)
 	cf.SetColorEnabled(!noColor)
 
+	withRoot := c.Value("with-root").(bool)
+
 	sshConfig := ssh.ExpandPath(c.Value("ssh-config").(string))
 	sshAlias := c.Value("alias").(string)
 	sshHost := c.Value("host").(string)
@@ -26,6 +28,7 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 	sshKey := ssh.ExpandPath(c.Value("key").(string))
 
 	log.Debug().
+		Bool("with-root", withRoot).
 		Bool("color", !noColor).
 		Str("path", sshConfig).
 		Str("alias", sshAlias).
@@ -87,21 +90,68 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("Could not get ssh connection")
 	}
 
-	var stats data.Stats
+	var sh shell.Shell
 
-	for range 50 {
+	if withRoot {
 
-		data.GetAllStats(client, &stats)
+		pd, err := ssh.PromptForPasswordF(
+			"Enter the sudo password for %s@%s: ",
+			client.Config.Hostname, client.Config.User,
+		)
+
+		if err != nil {
+			return err
+		}
+
+		sh = shell.NewPosixShell(string(pd))
+	} else {
+
+		sh = shell.NewPosixShell("")
+	}
+
+	systemStats := []data.SystemStat{
+		&data.ProcInfoSystemStat{},
+		&data.DockerSystemStat{},
+		&data.FSSystemStat{},
+		&data.NetIntfSystemStat{},
+	}
+
+	shellType := sh.GetType()
+	allCmds := make([]shell.ShellCmd, 0)
+	for range 1 {
+
+		allCmds = allCmds[0:0]
+
+		for _, stat := range systemStats {
+
+			for _, cmd := range stat.GetCmds(shellType) {
+
+				allCmds = append(allCmds, cmd)
+			}
+		}
+
+		results, err := client.RunCommands(sh, allCmds)
+
+		if err != nil {
+			return err
+		}
 
 		fmt.Print("\033[H\033[2J")
-		PrintStats(&stats)
 
-		time.Sleep(1 * time.Second)
+		i := 0
+		for _, stat := range systemStats {
+
+			n := stat.CmdCount(shellType)
+			stat.ParseCmdOutput(shellType, results[i:i+n])
+			i += n
+
+			PrintStat(stat)
+		}
 	}
 	return nil
 }
 
-func PrintStats(s *data.Stats) {
+func PrintStat(stat data.SystemStat) {
 
 	pad := 25
 	memAlign := 5
@@ -109,80 +159,105 @@ func PrintStats(s *data.Stats) {
 	fsAlign := 5
 	nwAlign := 5
 
-	d := int(s.Uptime.Hours()) / 24
-	h := int(s.Uptime.Hours()) % 24
-	m := int(s.Uptime.Minutes()) % 60
-	ss := int(s.Uptime.Seconds()) % 60
+	switch v := stat.(type) {
 
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Hostname", pad)), cf.CGreenBold(s.Hostname))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Uptime", pad)), cf.CYellow(fmt.Sprintf("%dd %dh %dm %ds", d, h, m, ss)))
+	case *data.ProcInfoSystemStat:
+		d := int(v.Uptime.Hours()) / 24
+		h := int(v.Uptime.Hours()) % 24
+		m := int(v.Uptime.Minutes()) % 60
+		ss := int(v.Uptime.Seconds()) % 60
 
-	fmt.Println()
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Hostname", pad)), cf.CGreenBold(v.Hostname))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Uptime", pad)), cf.CYellow(fmt.Sprintf("%dd %dh %dm %ds", d, h, m, ss)))
 
-	fmt.Printf("%s :  1m %s\n", cf.CBold(cf.LPad("Load Avg", pad)), cf.CBold(s.Load1))
-	fmt.Printf("%s :  5m %s\n", cf.CBold(cf.LPad("        ", pad)), cf.CBold(s.Load5))
-	fmt.Printf("%s : 10m %s\n", cf.CBold(cf.LPad("        ", pad)), cf.CBold(s.Load10))
+		fmt.Println()
 
-	fmt.Println()
+		fmt.Printf("%s :  1m %s\n", cf.CBold(cf.LPad("Load Avg", pad)), cf.CBold(v.Load1))
+		fmt.Printf("%s :  5m %s\n", cf.CBold(cf.LPad("        ", pad)), cf.CBold(v.Load5))
+		fmt.Printf("%s : 10m %s\n", cf.CBold(cf.LPad("        ", pad)), cf.CBold(v.Load10))
 
-	fmt.Printf("%s : %s running of %s total\n", cf.CBold(cf.LPad("Processes", pad)), cf.CCyan(s.RunningProcs), cf.CCyan(s.TotalProcs))
+		fmt.Println()
 
-	fmt.Println()
+		fmt.Printf("%s : %s running of %s total\n", cf.CBold(cf.LPad("Processes", pad)), cf.CCyan(v.RunningProcs), cf.CCyan(v.TotalProcs))
 
-	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Memory", pad)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Total", pad)), cf.CCyan(cf.FmtByteU64(s.MemTotal, memAlign)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Free", pad)), cf.CCyan(cf.FmtByteU64(s.MemFree, memAlign)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Buffers", pad)), cf.CCyan(cf.FmtByteU64(s.MemBuffers, memAlign)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Cached", pad)), cf.CCyan(cf.FmtByteU64(s.MemCached, memAlign)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Swap Total", pad)), cf.CCyan(cf.FmtByteU64(s.SwapTotal, memAlign)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Swap Free", pad)), cf.CCyan(cf.FmtByteU64(s.SwapFree, memAlign)))
+		fmt.Println()
 
-	fmt.Println()
+		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Memory", pad)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Total", pad)), cf.CCyan(cf.FmtByteU64(v.MemTotal, memAlign)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Free", pad)), cf.CCyan(cf.FmtByteU64(v.MemFree, memAlign)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Buffers", pad)), cf.CCyan(cf.FmtByteU64(v.MemBuffers, memAlign)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Cached", pad)), cf.CCyan(cf.FmtByteU64(v.MemCached, memAlign)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Swap Total", pad)), cf.CCyan(cf.FmtByteU64(v.SwapTotal, memAlign)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Swap Free", pad)), cf.CCyan(cf.FmtByteU64(v.SwapFree, memAlign)))
 
-	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("CPU", pad)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("User", pad)), cf.CCyan(cf.FmtPercent(s.CPU.User, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Nice", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Nice, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("System", pad)), cf.CCyan(cf.FmtPercent(s.CPU.System, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Idle", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Idle, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IOWait", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Iowait, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IRQ", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Irq, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("SoftIRQ", pad)), cf.CCyan(cf.FmtPercent(s.CPU.SoftIrq, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Steal", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Steal, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Guest", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Guest, cpuAlgin)))
+		fmt.Println()
 
-	fmt.Println()
+		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("CPU", pad)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("User", pad)), cf.CCyan(cf.FmtPercent(v.CPU.User, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Nice", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Nice, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("System", pad)), cf.CCyan(cf.FmtPercent(v.CPU.System, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Idle", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Idle, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IOWait", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Iowait, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IRQ", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Irq, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("SoftIRQ", pad)), cf.CCyan(cf.FmtPercent(v.CPU.SoftIrq, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Steal", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Steal, cpuAlgin)))
+		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Guest", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Guest, cpuAlgin)))
 
-	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("File Systems", pad)))
-	for _, fs := range s.FSInfos {
+		fmt.Println()
 
-		fmt.Printf("%s%s : %s used   %s free   (%s)\n",
-			cf.LPad("", 5),
-			cf.CBold(cf.LPad(fs.MountPoint, pad)),
-			cf.CGreen(cf.FmtByteU64(fs.Used, fsAlign)),
-			cf.CGreen(cf.FmtByteU64(fs.Free, fsAlign)),
-			cf.CYellowBold(cf.FmtPercent(100*(float32(fs.Used)/float32(fs.Free+fs.Used)), 4)),
-		)
+	case *data.FSSystemStat:
+
+		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("File Systems", pad)))
+		for _, fs := range v.FSInfos {
+
+			fmt.Printf("%s : %s used   %s free   (%s)\n",
+				cf.CBold(cf.LPad(fs.MountPoint, pad)),
+				cf.CGreen(cf.FmtByteU64(fs.Used, fsAlign)),
+				cf.CGreen(cf.FmtByteU64(fs.Free, fsAlign)),
+				cf.CYellowBold(cf.FmtPercent(100*(float32(fs.Used)/float32(fs.Free+fs.Used)), 4)),
+			)
+		}
+
+		fmt.Println()
+
+	case *data.NetIntfSystemStat:
+
+		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Network Interfaces", pad)))
+
+		keys := make([]string, 0, len(v.NetIntf))
+		for k := range v.NetIntf {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, name := range keys {
+
+			intf := v.NetIntf[name]
+			fmt.Printf("%s : ", cf.CBold(cf.LPad(name, pad)))
+			fmt.Printf("%s   ", cf.CYellow(cf.LPad(intf.IPv4, len("xxx.xxx.xxx.xxx/32"))))
+			fmt.Printf("%s   ", cf.CRed(cf.LPad(intf.IPv6, len("xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx/64"))))
+			fmt.Printf(" in %s  ", cf.CGreen(cf.FmtByteU64(intf.Rx, nwAlign)))
+			fmt.Printf("out %s\n", cf.CGreen(cf.FmtByteU64(intf.Tx, nwAlign)))
+		}
+
+	case *data.DockerSystemStat:
+
+		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Docker containers", pad)))
+		for _, ct := range v.DockerContainers {
+
+			fmt.Printf("%s : CPU %s  MemUsage %s  Mem%% %s  NetIO %s  BlockIO %s  PIDS %s  %s \n",
+				cf.CBold(cf.LPad(ct.Name, pad)),
+				cf.CBold(ct.CPU),
+				cf.CBold(ct.MemUsage),
+				cf.CBold(ct.MemPerc),
+				cf.CBold(ct.NetIO),
+				cf.CBold(ct.BlockIO),
+				cf.CBold(ct.PIDs),
+				cf.CBold(ct.ID),
+			)
+		}
+
+		fmt.Println()
+
 	}
-
-	fmt.Println()
-
-	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Network Interfaces", pad)))
-
-	keys := make([]string, 0, len(s.NetIntf))
-	for k := range s.NetIntf {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, name := range keys {
-
-		intf := s.NetIntf[name]
-		fmt.Printf("%s : ", cf.CBold(cf.LPad(name, pad)))
-		fmt.Printf("%s   ", cf.CYellow(cf.LPad(intf.IPv4, len("xxx.xxx.xxx.xxx/32"))))
-		fmt.Printf("%s   ", cf.CRed(cf.LPad(intf.IPv6, len("xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx/64"))))
-		fmt.Printf(" in %s  ", cf.CGreen(cf.FmtByteU64(intf.Rx, nwAlign)))
-		fmt.Printf("out %s\n", cf.CGreen(cf.FmtByteU64(intf.Tx, nwAlign)))
-	}
-
-	fmt.Println()
 }
