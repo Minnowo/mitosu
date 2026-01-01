@@ -8,13 +8,13 @@ import (
 
 func FmtByteU64(b uint64, align int) string {
 	bf := float64(b)
-	for _, unit := range []string{"  ", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"} {
+	for _, unit := range []string{"B  ", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB"} {
 		if math.Abs(bf) < 1024.0 {
-			return fmt.Sprintf("%*.*f %sB", align, 1, bf, unit)
+			return fmt.Sprintf("%*.*f %s", align, 1, bf, unit)
 		}
 		bf /= 1024.0
 	}
-	return fmt.Sprintf("%*.*f YiB", align, 1, bf)
+	return fmt.Sprintf("%*.*f Yi", align, 1, bf)
 }
 
 func FmtPercent(p float32, align int) string {

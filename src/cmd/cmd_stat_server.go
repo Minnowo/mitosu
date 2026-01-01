@@ -7,18 +7,23 @@ import (
 	"mitosu/src/data"
 	"mitosu/src/shell"
 	"mitosu/src/ssh"
+	"os"
+	"os/signal"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 )
 
-func CmdStat(ctx context.Context, c *cli.Command) error {
+func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat) error {
 
 	noColor := c.Value("no-color").(bool)
 	cf.SetColorEnabled(!noColor)
 
 	withRoot := c.Value("with-root").(bool)
+	poll := c.Value("poll").(bool)
 
 	sshConfig := ssh.ExpandPath(c.Value("ssh-config").(string))
 	sshAlias := c.Value("alias").(string)
@@ -28,6 +33,7 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 	sshKey := ssh.ExpandPath(c.Value("key").(string))
 
 	log.Debug().
+		Bool("poll", poll).
 		Bool("with-root", withRoot).
 		Bool("color", !noColor).
 		Str("path", sshConfig).
@@ -109,17 +115,17 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 		sh = shell.NewPosixShell("")
 	}
 
-	systemStats := []data.SystemStat{
-		&data.ProcInfoSystemStat{},
-		&data.DockerSystemStat{},
-		&data.FSSystemStat{},
-		&data.NetIntfSystemStat{},
-	}
-
 	shellType := sh.GetType()
 	allCmds := make([]shell.ShellCmd, 0)
-	for range 1 {
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	defer client.Close()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
 		allCmds = allCmds[0:0]
 
 		for _, stat := range systemStats {
@@ -147,13 +153,25 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 
 			PrintStat(stat)
 		}
+
+		if !poll {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nExiting cleanly.")
+			return nil
+		case <-ticker.C:
+		}
 	}
+
 	return nil
 }
 
 func PrintStat(stat data.SystemStat) {
 
-	pad := 25
+	pad := 30
 	memAlign := 5
 	cpuAlgin := 4
 	fsAlign := 5
@@ -245,15 +263,16 @@ func PrintStat(stat data.SystemStat) {
 		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Docker containers", pad)))
 		for _, ct := range v.DockerContainers {
 
-			fmt.Printf("%s : CPU %s  MemUsage %s  Mem%% %s  NetIO %s  BlockIO %s  PIDS %s  %s \n",
+			fmt.Printf("%s : CPU %s   Mem %s   NetIO %s %s   BlockIO %s %s   PIDS %s   %s \n",
 				cf.CBold(cf.LPad(ct.Name, pad)),
-				cf.CBold(ct.CPU),
-				cf.CBold(ct.MemUsage),
-				cf.CBold(ct.MemPerc),
-				cf.CBold(ct.NetIO),
-				cf.CBold(ct.BlockIO),
-				cf.CBold(ct.PIDs),
-				cf.CBold(ct.ID),
+				cf.CBold(cf.LPad(ct.CPU, 6)),
+				cf.CBold(cf.FmtByteU64(ct.MemUsed, 5)),
+				cf.CBold(cf.FmtByteU64(ct.NetIn, 5)),
+				cf.CBold(cf.FmtByteU64(ct.NetOut, 5)),
+				cf.CBold(cf.FmtByteU64(ct.BlockIn, 5)),
+				cf.CBold(cf.FmtByteU64(ct.BlockOut, 5)),
+				cf.CBold(cf.LPad(strconv.FormatUint(ct.PIDs, 10), 4)),
+				cf.CBold(ct.ID[0:len("xxxxxxxxxxxx")]),
 			)
 		}
 

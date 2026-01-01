@@ -61,6 +61,11 @@ func NewClient(s Section) (SSHClient, error) {
 	return sshClient, err
 }
 
+func (s *SSHClient) Close() error {
+	s.Client.Close()
+	return nil
+}
+
 func (s *SSHClient) RunCommand(command string) (string, error) {
 
 	log.Debug().Str("command", command).Msg("Running command")
@@ -166,8 +171,8 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []shell.ShellCmd) ([]st
 		results = results[0:len(commands)]
 	}
 
-	log.Debug().Msg(stdout)
-	log.Error().Msg(stderr)
+	log.Debug().Str("stdout", "yes").Msg(stdout)
+	log.Debug().Str("stderr", "yes").Msg(stderr)
 	// log.Debug().Int("len", len(results)).Strs("stdout", results).Msg("got result of commands")
 
 	return results, nil

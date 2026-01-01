@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"mitosu/src/cmd"
+	"mitosu/src/data"
 	"mitosu/src/logger"
 	"os"
 
@@ -32,12 +33,17 @@ func main() {
 			{
 				Name:        "stat",
 				Description: "See stats of a server",
-				Action:      cmd.CmdStat,
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name:     "no-color",
 						Aliases:  []string{"n"},
 						Usage:    "If true, don't color the output",
+						Required: false,
+					},
+					&cli.BoolFlag{
+						Name:     "poll",
+						Aliases:  []string{"P"},
+						Usage:    "Loop forever",
 						Required: false,
 					},
 					&cli.BoolFlag{
@@ -84,6 +90,38 @@ func main() {
 						Aliases:  []string{"i"},
 						Usage:    "The ssh private key file path",
 						Required: false,
+					},
+				},
+				Commands: []*cli.Command{
+					{
+						Name:        "all",
+						Description: "See all stats",
+						Action: func(ctx context.Context, c *cli.Command) error {
+							return cmd.CmdStat(ctx, c, []data.SystemStat{
+								&data.ProcInfoSystemStat{},
+								&data.DockerSystemStat{},
+								&data.FSSystemStat{},
+								&data.NetIntfSystemStat{},
+							})
+						},
+					},
+					{
+						Name:        "docker",
+						Description: "See Docker stats",
+						Action: func(ctx context.Context, c *cli.Command) error {
+							return cmd.CmdStat(ctx, c, []data.SystemStat{
+								&data.DockerSystemStat{},
+							})
+						},
+					},
+					{
+						Name:        "fs",
+						Description: "See file system stats",
+						Action: func(ctx context.Context, c *cli.Command) error {
+							return cmd.CmdStat(ctx, c, []data.SystemStat{
+								&data.FSSystemStat{},
+							})
+						},
 					},
 				},
 			},
