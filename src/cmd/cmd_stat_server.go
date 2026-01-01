@@ -142,8 +142,6 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 			return err
 		}
 
-		fmt.Print("\033[H\033[2J")
-
 		i := 0
 		for _, stat := range systemStats {
 
@@ -163,6 +161,7 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 			fmt.Println("\nExiting cleanly.")
 			return nil
 		case <-ticker.C:
+			fmt.Print("\033[H\033[2J")
 		}
 	}
 
