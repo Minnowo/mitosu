@@ -8,11 +8,11 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
-var(
+
+var (
 	ErrAgentNotAvailable = errors.New("SSH agent not available: SSH_AUTH_SOCK is not set")
 	ErrAgentConnect      = errors.New("failed to connect to SSH agent socket")
 )
-
 
 func GetAgentAuthMethod(user, addr string) (gossh.AuthMethod, error) {
 
@@ -24,8 +24,8 @@ func GetAgentAuthMethod(user, addr string) (gossh.AuthMethod, error) {
 
 	agconn, err := net.Dial("unix", sock)
 
-	if  err != nil {
-		return nil,ErrAgentConnect
+	if err != nil {
+		return nil, ErrAgentConnect
 	}
 
 	ag := agent.NewClient(agconn)
@@ -33,4 +33,3 @@ func GetAgentAuthMethod(user, addr string) (gossh.AuthMethod, error) {
 
 	return authMethod, nil
 }
-

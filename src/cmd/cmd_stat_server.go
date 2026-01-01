@@ -26,13 +26,13 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 	sshKey := ssh.ExpandPath(c.Value("key").(string))
 
 	log.Debug().
-		Bool("color", !noColor). 
-		Str("path", sshConfig). 
-		Str("alias",sshAlias). 
-		Str("host", sshHost). 
-		Int("port",sshPort). 
-		Str("user",sshUser). 
-		Str("key",sshKey). 
+		Bool("color", !noColor).
+		Str("path", sshConfig).
+		Str("alias", sshAlias).
+		Str("host", sshHost).
+		Int("port", sshPort).
+		Str("user", sshUser).
+		Str("key", sshKey).
 		Msg("About to run stat")
 
 	config, err := ssh.ParseConfig(sshConfig)
@@ -43,10 +43,10 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 
 	section := ssh.Section{
 		Name:         "mitosu CLI",
-		Hostname:sshHost,
+		Hostname:     sshHost,
 		Port:         sshPort,
-		User:sshUser,
-		IdentityFile:sshKey,
+		User:         sshUser,
+		IdentityFile: sshKey,
 	}
 
 	var client ssh.SSHClient
@@ -87,16 +87,16 @@ func CmdStat(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("Could not get ssh connection")
 	}
 
-
 	var stats data.Stats
 
-	for range 5 {
+	for range 50 {
 
 		data.GetAllStats(client, &stats)
 
+		fmt.Print("\033[H\033[2J")
 		PrintStats(&stats)
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 	return nil
 }
@@ -114,8 +114,8 @@ func PrintStats(s *data.Stats) {
 	m := int(s.Uptime.Minutes()) % 60
 	ss := int(s.Uptime.Seconds()) % 60
 
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Hostname",pad)), cf.CGreenBold(s.Hostname))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Uptime",pad)), cf.CYellow(fmt.Sprintf("%dd %dh %dm %ds", d, h, m,ss)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Hostname", pad)), cf.CGreenBold(s.Hostname))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Uptime", pad)), cf.CYellow(fmt.Sprintf("%dd %dh %dm %ds", d, h, m, ss)))
 
 	fmt.Println()
 
@@ -125,7 +125,7 @@ func PrintStats(s *data.Stats) {
 
 	fmt.Println()
 
-	fmt.Printf("%s : %s running of %s total\n", cf.CBold(cf.LPad("Processes",pad)), cf.CCyan(s.RunningProcs), cf.CCyan(s.TotalProcs))
+	fmt.Printf("%s : %s running of %s total\n", cf.CBold(cf.LPad("Processes", pad)), cf.CCyan(s.RunningProcs), cf.CCyan(s.TotalProcs))
 
 	fmt.Println()
 
@@ -139,20 +139,20 @@ func PrintStats(s *data.Stats) {
 
 	fmt.Println()
 
-	fmt.Printf("%s : \n",  cf.CMagenta(cf.LPad("CPU", pad)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("User",pad)), cf.CCyan(cf.FmtPercent(s.CPU.User, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Nice",pad)), cf.CCyan(cf.FmtPercent(s.CPU.Nice, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("System",pad)), cf.CCyan(cf.FmtPercent(s.CPU.System, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Idle",pad)), cf.CCyan(cf.FmtPercent(s.CPU.Idle, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IOWait",pad)), cf.CCyan(cf.FmtPercent(s.CPU.Iowait, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IRQ",pad)), cf.CCyan(cf.FmtPercent(s.CPU.Irq, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("SoftIRQ",pad)), cf.CCyan(cf.FmtPercent(s.CPU.SoftIrq, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Steal",pad)), cf.CCyan(cf.FmtPercent(s.CPU.Steal, cpuAlgin)))
-	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Guest",pad)), cf.CCyan(cf.FmtPercent(s.CPU.Guest, cpuAlgin)))
+	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("CPU", pad)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("User", pad)), cf.CCyan(cf.FmtPercent(s.CPU.User, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Nice", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Nice, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("System", pad)), cf.CCyan(cf.FmtPercent(s.CPU.System, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Idle", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Idle, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IOWait", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Iowait, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("IRQ", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Irq, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("SoftIRQ", pad)), cf.CCyan(cf.FmtPercent(s.CPU.SoftIrq, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Steal", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Steal, cpuAlgin)))
+	fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Guest", pad)), cf.CCyan(cf.FmtPercent(s.CPU.Guest, cpuAlgin)))
 
 	fmt.Println()
 
-	fmt.Printf("%s : \n",  cf.CMagenta(cf.LPad("File Systems", pad)))
+	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("File Systems", pad)))
 	for _, fs := range s.FSInfos {
 
 		fmt.Printf("%s%s : %s used   %s free   (%s)\n",
@@ -160,14 +160,13 @@ func PrintStats(s *data.Stats) {
 			cf.CBold(cf.LPad(fs.MountPoint, pad)),
 			cf.CGreen(cf.FmtByteU64(fs.Used, fsAlign)),
 			cf.CGreen(cf.FmtByteU64(fs.Free, fsAlign)),
-			cf.CYellowBold(cf.FmtPercent(100*(float32(fs.Used) / float32(fs.Free + fs.Used)), 4)),
+			cf.CYellowBold(cf.FmtPercent(100*(float32(fs.Used)/float32(fs.Free+fs.Used)), 4)),
 		)
 	}
 
 	fmt.Println()
 
-	fmt.Printf("%s : \n",  cf.CMagenta(cf.LPad("Network Interfaces", pad)))
-
+	fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Network Interfaces", pad)))
 
 	keys := make([]string, 0, len(s.NetIntf))
 	for k := range s.NetIntf {

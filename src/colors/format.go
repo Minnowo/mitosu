@@ -17,7 +17,6 @@ func FmtByteU64(b uint64, align int) string {
 	return fmt.Sprintf("%*.*f YiB", align, 1, bf)
 }
 
-
 func FmtPercent(p float32, align int) string {
 	return fmt.Sprintf("%*s%%", align, fmt.Sprintf("%.1f", p))
 }
@@ -28,5 +27,3 @@ func LPad(s string, pad int) string {
 	}
 	return strings.Repeat(" ", pad-len(s)) + s
 }
-
-

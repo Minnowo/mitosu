@@ -8,12 +8,12 @@ import (
 )
 
 type SSHConfig struct {
-	Path string
+	Path     string
 	Sections []Section
 }
 
 type Section struct {
-	Name string
+	Name         string
 	Hostname     string
 	Port         int
 	User         string
@@ -30,7 +30,7 @@ func ParseConfig(path string) (*SSHConfig, error) {
 	defer f.Close()
 
 	cfg := SSHConfig{
-		Path:    path,
+		Path:     path,
 		Sections: []Section{},
 	}
 

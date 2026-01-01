@@ -1,4 +1,3 @@
-
 // Taken and modified from
 // https://github.com/rapidloop/rtop/blob/master/stats.go
 
@@ -6,10 +5,13 @@ package data
 
 import (
 	"bufio"
+	"mitosu/src/shell"
 	"mitosu/src/ssh"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type FSInfo struct {
@@ -67,34 +69,52 @@ type Stats struct {
 	FSInfos      []FSInfo
 	NetIntf      map[string]NetIntfInfo
 	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
-	preCPU cpuRaw
+	preCPU       cpuRaw
 }
 
 func GetAllStats(client ssh.SSHClient, stats *Stats) {
-	getUptime(client, stats)
-	getHostname(client, stats)
-	getLoad(client, stats)
-	getMemInfo(client, stats)
-	getFSInfo(client, stats)
-	getInterfaces(client, stats)
-	getInterfaceInfo(client, stats)
-	getCPU(client, stats)
-}
 
-func getUptime(client ssh.SSHClient, stats *Stats) (error) {
+	cmds := []string{
+		"/bin/cat /proc/uptime",
+		"/bin/hostname -f",
+		"/bin/cat /proc/loadavg",
+		"/bin/cat /proc/meminfo",
+		"/bin/df -B1",
+		"/bin/ip -o addr || /sbin/ip -o addr",
+		"/bin/cat /proc/net/dev",
+		"/bin/cat /proc/stat",
+	}
 
-	uptime, err := client.RunCommand("/bin/cat /proc/uptime")
+	stdout, err := client.RunCommands(shell.PosixShell{}, cmds)
 
 	if err != nil {
-		return err 
+		log.Warn().Err(err).Msg("shell returned error")
+		return
 	}
+
+	if len(stdout) != len(cmds) {
+		log.Warn().Int("got", len(stdout)).Int("wanted", len(cmds)).Msg("got wrong number of outputs")
+		return
+	}
+
+	getUptime(stdout[0], stats)
+	getHostname(stdout[1], stats)
+	getLoad(stdout[2], stats)
+	getMemInfo(stdout[3], stats)
+	getFSInfo(stdout[4], stats)
+	getInterfaces(stdout[5], stats)
+	getInterfaceInfo(stdout[6], stats)
+	getCPU(stdout[7], stats)
+}
+
+func getUptime(uptime string, stats *Stats) error {
 
 	parts := strings.Fields(uptime)
 
 	if len(parts) == 2 {
 
 		var upsecs float64
-		upsecs, err = strconv.ParseFloat(parts[0], 64)
+		upsecs, err := strconv.ParseFloat(parts[0], 64)
 
 		if err != nil {
 			return err
@@ -105,26 +125,14 @@ func getUptime(client ssh.SSHClient, stats *Stats) (error) {
 	return nil
 }
 
-func getHostname(client ssh.SSHClient, stats *Stats) (error) {
-
-	hostname, err := client.RunCommand( "/bin/hostname -f")
-
-	if err != nil {
-		return err 
-	}
+func getHostname(hostname string, stats *Stats) error {
 
 	stats.Hostname = strings.TrimSpace(hostname)
 
 	return nil
 }
 
-func getLoad(client ssh.SSHClient, stats *Stats) (error) {
-
-	line, err := client.RunCommand("/bin/cat /proc/loadavg")
-
-	if err != nil {
-		return err
-	}
+func getLoad(line string, stats *Stats) error {
 
 	parts := strings.Fields(line)
 
@@ -143,13 +151,7 @@ func getLoad(client ssh.SSHClient, stats *Stats) (error) {
 	return nil
 }
 
-func getMemInfo(client ssh.SSHClient, stats *Stats) (error) {
-
-	lines, err := client.RunCommand("/bin/cat /proc/meminfo")
-
-	if err != nil {
-		return err
-	}
+func getMemInfo(lines string, stats *Stats) error {
 
 	scanner := bufio.NewScanner(strings.NewReader(lines))
 
@@ -190,13 +192,7 @@ func getMemInfo(client ssh.SSHClient, stats *Stats) (error) {
 	return nil
 }
 
-func getFSInfo(client ssh.SSHClient, stats *Stats) (error) {
-
-	lines, err :=client.RunCommand( "/bin/df -B1")
-
-	if err != nil {
-		return err 
-	}
+func getFSInfo(lines string, stats *Stats) error {
 
 	stats.FSInfos = stats.FSInfos[:0]
 
@@ -237,28 +233,15 @@ func getFSInfo(client ssh.SSHClient, stats *Stats) (error) {
 	return nil
 }
 
-func getInterfaces(client ssh.SSHClient, stats *Stats) (error) {
-
-	var lines string
-
-	lines, err := client.RunCommand("/bin/ip -o addr")
-
-	if err != nil {
-
-		// try /sbin/ip
-		lines, err = client.RunCommand("/sbin/ip -o addr")
-
-		if err != nil {
-			return err
-		}
-	}
+func getInterfaces(lines string, stats *Stats) error {
 
 	if stats.NetIntf == nil {
 		stats.NetIntf = make(map[string]NetIntfInfo)
-	}
+	} else {
 
-	for k := range stats.NetIntf {
-		delete(stats.NetIntf, k)
+		for k := range stats.NetIntf {
+			delete(stats.NetIntf, k)
+		}
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(lines))
@@ -295,17 +278,7 @@ func getInterfaces(client ssh.SSHClient, stats *Stats) (error) {
 	return nil
 }
 
-func getInterfaceInfo(client ssh.SSHClient, stats *Stats) (error) {
-
-	lines, err :=client.RunCommand( "/bin/cat /proc/net/dev")
-
-	if err != nil {
-		return err 
-	}
-
-	if stats.NetIntf == nil {
-		return err
-	} // should have been here already
+func getInterfaceInfo(lines string, stats *Stats) error {
 
 	scanner := bufio.NewScanner(strings.NewReader(lines))
 
@@ -342,49 +315,7 @@ func getInterfaceInfo(client ssh.SSHClient, stats *Stats) (error) {
 	return nil
 }
 
-func parseCPUFields(fields []string, stat *cpuRaw) {
-
-	numFields := len(fields)
-
-	for i := 1; i < numFields; i++ {
-
-		val, err := strconv.ParseUint(fields[i], 10, 64)
-
-		if err != nil {
-			continue
-		}
-
-		stat.Total += val
-		switch i {
-		case 1:
-			stat.User = val
-		case 2:
-			stat.Nice = val
-		case 3:
-			stat.System = val
-		case 4:
-			stat.Idle = val
-		case 5:
-			stat.Iowait = val
-		case 6:
-			stat.Irq = val
-		case 7:
-			stat.SoftIrq = val
-		case 8:
-			stat.Steal = val
-		case 9:
-			stat.Guest = val
-		}
-	}
-}
-
-func getCPU(client ssh.SSHClient, stats *Stats) (error) {
-
-	lines, err := client.RunCommand("/bin/cat /proc/stat")
-
-	if err != nil {
-		return err
-	}
+func getCPU(lines string, stats *Stats) error {
 
 	var (
 		nowCPU cpuRaw
@@ -398,11 +329,44 @@ func getCPU(client ssh.SSHClient, stats *Stats) (error) {
 		line := scanner.Text()
 
 		fields := strings.Fields(line)
+		numFields := len(fields)
 
-		if len(fields) > 0 && fields[0] == "cpu" { // changing here if want to get every cpu-core's stats
-			parseCPUFields(fields, &nowCPU)
-			break
+		if numFields <= 0 || fields[0] != "cpu" { // changing here if want to get every cpu-core's stats
+			continue
 		}
+
+		for i := 1; i < numFields; i++ {
+
+			val, err := strconv.ParseUint(fields[i], 10, 64)
+
+			if err != nil {
+				continue
+			}
+
+			nowCPU.Total += val
+			switch i {
+			case 1:
+				nowCPU.User = val
+			case 2:
+				nowCPU.Nice = val
+			case 3:
+				nowCPU.System = val
+			case 4:
+				nowCPU.Idle = val
+			case 5:
+				nowCPU.Iowait = val
+			case 6:
+				nowCPU.Irq = val
+			case 7:
+				nowCPU.SoftIrq = val
+			case 8:
+				nowCPU.Steal = val
+			case 9:
+				nowCPU.Guest = val
+			}
+		}
+
+		break
 	}
 
 	preCPU := stats.preCPU

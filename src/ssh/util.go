@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-
 func ExpandPath(path string) string {
 
 	usr, _ := user.Current()
@@ -14,7 +13,7 @@ func ExpandPath(path string) string {
 
 	if path == "~" {
 		return dir
-	} 
+	}
 
 	if strings.HasPrefix(path, "~/") {
 		return filepath.Join(dir, path[2:])
@@ -22,4 +21,3 @@ func ExpandPath(path string) string {
 
 	return path
 }
-

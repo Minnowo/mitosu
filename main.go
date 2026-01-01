@@ -13,12 +13,21 @@ import (
 
 func main() {
 
-	logger.Init(zerolog.InfoLevel)
+	logger.Init(zerolog.DebugLevel)
 
 	cmd := &cli.Command{
-		Name: "mitosu",
+		Name:        "mitosu",
 		Description: "A simple pure SSH server monitoring tool.",
-		Usage: "See through your servers at a glance",
+		Usage:       "See through your servers at a glance",
+		Flags: []cli.Flag{
+			&cli.IntFlag{
+				Name:     "log-level",
+				Usage:    "Set the log level",
+				Value:    1,
+				Required: false,
+			},
+		},
+		Before: logger.CliInit,
 		Commands: []*cli.Command{
 			{
 				Name:        "stat",
