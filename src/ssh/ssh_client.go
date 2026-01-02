@@ -22,16 +22,16 @@ func NewClient(s Section) (SSHClient, error) {
 
 	authMethods := make([]gossh.AuthMethod, 0, 3)
 
-	if m, err := GetAgentAuthMethod(s.User, s.Hostname); err == nil {
-		authMethods = append(authMethods, m)
-	} else {
-		log.Debug().Err(err).Msg("Could not get ssh agent auth method")
-	}
-
 	if m, err := GetKeyAuthMethod(s.IdentityFile); err == nil {
 		authMethods = append(authMethods, m)
 	} else {
 		log.Debug().Err(err).Msg("Could not get key auth method")
+	}
+
+	if m, err := GetAgentAuthMethod(s.User, s.Hostname); err == nil {
+		authMethods = append(authMethods, m)
+	} else {
+		log.Debug().Err(err).Msg("Could not get ssh agent auth method")
 	}
 
 	m := GetPasswordAuthMethod(s.User, s.Hostname)
