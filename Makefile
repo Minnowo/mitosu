@@ -38,3 +38,27 @@ test-clean: format generate
 	go clean -testcache
 
 
+.PHONY: release
+release:
+	docker build -t mitosu:build -f docker/Dockerfile.build docker
+	docker run \
+		--rm \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v $$PWD:/work \
+		-w /work \
+		mitosu:build \
+		release --skip=validate --clean --snapshot
+
+
+.PHONY: release-github
+release-github:
+	docker build -t mitosu:build -f docker/Dockerfile.build docker
+	docker run \
+		--rm \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v $$PWD:/work \
+		-e GITHUB_TOKEN=$$GITHUB_TOKEN \
+		-w /work \
+		mitosu:build \
+		release --skip=validate --clean
+
