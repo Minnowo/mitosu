@@ -27,3 +27,9 @@ func LPad(s string, pad int) string {
 	}
 	return strings.Repeat(" ", pad-len(s)) + s
 }
+func RPad(s string, pad int) string {
+	if len(s) >= pad {
+		return s
+	}
+	return s + strings.Repeat(" ", pad-len(s))
+}

@@ -92,3 +92,7 @@ func CYellowBold(s string) string {
 func CBlueBold(s string) string {
 	return WithColorBold(s, colorBlue)
 }
+
+func CMagentaBold(s string) string {
+	return WithColorBold(s, colorMagenta)
+}

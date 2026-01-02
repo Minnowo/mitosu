@@ -179,6 +179,7 @@ func PrintStat(stat data.SystemStat) {
 	switch v := stat.(type) {
 
 	case *data.ProcInfoSystemStat:
+
 		d := int(v.Uptime.Hours()) / 24
 		h := int(v.Uptime.Hours()) % 24
 		m := int(v.Uptime.Minutes()) % 60
@@ -199,7 +200,7 @@ func PrintStat(stat data.SystemStat) {
 
 		fmt.Println()
 
-		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Memory", pad)))
+		fmt.Printf("%s : \n", cf.CMagentaBold(cf.LPad("Memory", pad)))
 		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Total", pad)), cf.CCyan(cf.FmtByteU64(v.MemTotal, memAlign)))
 		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Free", pad)), cf.CCyan(cf.FmtByteU64(v.MemFree, memAlign)))
 		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Buffers", pad)), cf.CCyan(cf.FmtByteU64(v.MemBuffers, memAlign)))
@@ -209,7 +210,7 @@ func PrintStat(stat data.SystemStat) {
 
 		fmt.Println()
 
-		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("CPU", pad)))
+		fmt.Printf("%s : \n", cf.CMagentaBold(cf.LPad("CPU", pad)))
 		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("User", pad)), cf.CCyan(cf.FmtPercent(v.CPU.User, cpuAlgin)))
 		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("Nice", pad)), cf.CCyan(cf.FmtPercent(v.CPU.Nice, cpuAlgin)))
 		fmt.Printf("%s : %s\n", cf.CBold(cf.LPad("System", pad)), cf.CCyan(cf.FmtPercent(v.CPU.System, cpuAlgin)))
@@ -224,14 +225,44 @@ func PrintStat(stat data.SystemStat) {
 
 	case *data.FSSystemStat:
 
-		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("File Systems", pad)))
+		if len(v.FSInfos) < 1 {
+			break
+		}
+
+		fsTypeLens := map[data.FSType]int{}
 		for _, fs := range v.FSInfos {
 
-			fmt.Printf("%s : %s used   %s free   (%s)\n",
-				cf.CBold(cf.LPad(fs.MountPoint, pad)),
-				cf.CGreen(cf.FmtByteU64(fs.Used, fsAlign)),
-				cf.CGreen(cf.FmtByteU64(fs.Free, fsAlign)),
+			if fs.Filesystem[0] != '/' {
+				continue
+			}
+			count, ok := fsTypeLens[fs.Type]
+
+			if !ok {
+				count = 0
+			}
+			fsTypeLens[fs.Type] = max(count, len(fs.Filesystem))
+		}
+
+		fsType := data.FS_NULL
+		for _, fs := range v.FSInfos {
+
+			if fs.Type != fsType {
+				fsType = fs.Type
+				fmt.Printf("\n%s : \n", cf.CMagentaBold(cf.LPad(fsType.String()+" File Systems", pad)))
+			}
+
+			if fs.Filesystem[0] == '/' {
+				// we want file paths to be right aligned
+				fmt.Printf("%s", cf.CBold(cf.LPad(cf.RPad(fs.Filesystem, fsTypeLens[fs.Type]), pad)))
+			} else {
+				fmt.Printf("%s", cf.CBold(cf.LPad(fs.Filesystem, pad)))
+			}
+
+			fmt.Printf(" : %s used  %s free  (%s)  %s\n",
+				cf.CCyan(cf.FmtByteU64(fs.Used, fsAlign)),
+				cf.CCyan(cf.FmtByteU64(fs.Free, fsAlign)),
 				cf.CYellowBold(cf.FmtPercent(100*(float32(fs.Used)/float32(fs.Free+fs.Used)), 4)),
+				cf.CBold(fs.MountPoint),
 			)
 		}
 
@@ -239,7 +270,11 @@ func PrintStat(stat data.SystemStat) {
 
 	case *data.NetIntfSystemStat:
 
-		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Network Interfaces", pad)))
+		if len(v.NetIntf) < 1 {
+			break
+		}
+
+		fmt.Printf("%s : \n", cf.CMagentaBold(cf.LPad("Network Interfaces", pad)))
 
 		keys := make([]string, 0, len(v.NetIntf))
 		for k := range v.NetIntf {
@@ -259,7 +294,12 @@ func PrintStat(stat data.SystemStat) {
 
 	case *data.DockerSystemStat:
 
-		fmt.Printf("%s : \n", cf.CMagenta(cf.LPad("Docker containers", pad)))
+		if len(v.DockerContainers) < 1 {
+			break
+		}
+
+		fmt.Printf("%s : \n", cf.CMagentaBold(cf.LPad("Docker Containers", pad)))
+
 		for _, ct := range v.DockerContainers {
 
 			fmt.Printf("%s : CPU %s   Mem %s   NetIO %s %s   BlockIO %s %s   PIDS %s   %s \n",
