@@ -26,7 +26,7 @@ func PromptForPasswordF(format string, args ...any) ([]byte, error) {
 	passCh := make(chan []byte)
 	errCh := make(chan error)
 	go func() {
-		fmt.Printf(format, args...)
+		fmt.Fprintf(os.Stderr, format, args...)
 		password, err := term.ReadPassword(in)
 
 		if err != nil {
@@ -38,13 +38,13 @@ func PromptForPasswordF(format string, args ...any) ([]byte, error) {
 
 	select {
 	case password := <-passCh:
-		fmt.Println()
+		fmt.Fprintln(os.Stderr)
 		return password, nil
 	case err := <-errCh:
-		fmt.Println()
+		fmt.Fprintln(os.Stderr)
 		return nil, err
 	case <-sig:
-		fmt.Println("\nCancelled.")
+		fmt.Fprintln(os.Stderr, "\nCancelled.")
 		return nil, fmt.Errorf("input cancelled")
 	}
 }

@@ -171,9 +171,7 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []shell.ShellCmd) ([]st
 		results = results[0:len(commands)]
 	}
 
-	log.Debug().Str("stdout", "yes").Msg(stdout)
-	log.Debug().Str("stderr", "yes").Msg(stderr)
-	// log.Debug().Int("len", len(results)).Strs("stdout", results).Msg("got result of commands")
+	log.Debug().Str("stderr", stderr).Str("stdout", stdout).Msg("Got SSH output")
 
 	return results, nil
 }
