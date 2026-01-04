@@ -135,7 +135,6 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 
 		ticker = time.NewTicker(time.Duration(poll) * time.Second)
 		defer ticker.Stop()
-
 		err := output.RawMode()
 
 		if err == nil {
@@ -274,16 +273,20 @@ func PrintStat(t *cf.VirtualTerm, stat data.SystemStat) {
 
 		t.Line("")
 
-		t.Line("%s : ", cf.MagentaBold(cf.LPad("CPU", pad)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("User", pad)), cf.Cyan(cf.FmtPercent(v.CPU.User, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("Nice", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Nice, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("System", pad)), cf.Cyan(cf.FmtPercent(v.CPU.System, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("Idle", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Idle, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("IOWait", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Iowait, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("IRQ", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Irq, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("SoftIRQ", pad)), cf.Cyan(cf.FmtPercent(v.CPU.SoftIrq, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("Steal", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Steal, cpuAlgin)))
-		t.Line("%s : %s", cf.Bold(cf.LPad("Guest", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Guest, cpuAlgin)))
+		if v.CPU.Total == 0 {
+			t.Line("%s : No CPU yet, use --poll ", cf.MagentaBold(cf.LPad("CPU", pad)))
+		} else {
+			t.Line("%s : ", cf.MagentaBold(cf.LPad("CPU", pad)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("User", pad)), cf.Cyan(cf.FmtPercent(v.CPU.User, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("Nice", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Nice, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("System", pad)), cf.Cyan(cf.FmtPercent(v.CPU.System, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("Idle", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Idle, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("IOWait", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Iowait, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("IRQ", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Irq, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("SoftIRQ", pad)), cf.Cyan(cf.FmtPercent(v.CPU.SoftIrq, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("Steal", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Steal, cpuAlgin)))
+			t.Line("%s : %s", cf.Bold(cf.LPad("Guest", pad)), cf.Cyan(cf.FmtPercent(v.CPU.Guest, cpuAlgin)))
+		}
 
 		t.Line("")
 

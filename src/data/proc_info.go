@@ -24,6 +24,7 @@ type CPURaw struct {
 }
 
 type CPUInfo struct {
+	Total   uint64 // total of all time fields
 	User    float32
 	Nice    float32
 	System  float32
@@ -283,6 +284,7 @@ func (f *ProcInfoSystemStat) getCPU(lines string) error {
 		f.CPU.Irq = float32(nowCPU.Irq-preCPU.Irq) / total * 100
 		f.CPU.SoftIrq = float32(nowCPU.SoftIrq-preCPU.SoftIrq) / total * 100
 		f.CPU.Guest = float32(nowCPU.Guest-preCPU.Guest) / total * 100
+		f.CPU.Total = nowCPU.Total
 	}
 
 	f.CPURaw = nowCPU
