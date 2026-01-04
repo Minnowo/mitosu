@@ -44,12 +44,6 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 		Str("key", sshKey).
 		Msg("About to run stat")
 
-	config, err := ssh.ParseConfig(sshConfig)
-
-	if err != nil {
-		return err
-	}
-
 	section := ssh.Section{
 		Name:         "mitosu CLI",
 		Hostname:     sshHost,
@@ -61,6 +55,12 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 	var client ssh.SSHClient
 
 	if sshAlias != "" {
+
+		config, err := ssh.ParseConfig(sshConfig)
+
+		if err != nil {
+			return err
+		}
 
 		for _, section := range config.Sections {
 
