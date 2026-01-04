@@ -22,9 +22,6 @@ type Shell interface {
 	// It expects a stdin root password immediately after running the command.
 	RootSh() string
 
-	// GetRootPassword returns the root password, or a ErrNoRootAccess error
-	GetRootPassword() (string, error)
-
 	// Echo returns the platforms 'echo' command echoing the given string
 	Echo(s string) string
 

@@ -1,13 +1,32 @@
 package ssh
 
-import gossh "golang.org/x/crypto/ssh"
+import (
+	"errors"
 
-func GetPasswordAuthMethod(user, host string) gossh.AuthMethod {
+	gossh "golang.org/x/crypto/ssh"
+)
+
+var (
+	ErrUserEmptyPassword = errors.New("No user password was given, and could not prompt for user password.")
+)
+
+func GetPasswordAuthMethod(user, host string, pwds *SSHPasswords) gossh.AuthMethod {
 
 	return gossh.PasswordCallback(func() (string, error) {
 
-		passwordBytes, err := PromptForPassword(user, host)
+		if pwds.UserPassword == "" {
 
-		return string(passwordBytes), err
+			if !pwds.CanPrompt {
+				return "", ErrUserEmptyPassword
+			}
+
+			if passwordBytes, err := PromptForPassword(user, host); err != nil {
+				return "", err
+			} else {
+				pwds.UserPassword = string(passwordBytes)
+			}
+		}
+
+		return pwds.UserPassword, nil
 	})
 }

@@ -1,13 +1,19 @@
 package ssh
 
 import (
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/rs/zerolog/log"
 	gossh "golang.org/x/crypto/ssh"
 )
 
-func GetKeyAuthMethod(keypath string) (gossh.AuthMethod, error) {
+var (
+	ErrEmptyKeyPassword = errors.New("Key requires password but got empty password.")
+)
+
+func GetKeyAuthMethod(keypath string, pwds *SSHPasswords) (gossh.AuthMethod, error) {
 
 	keyBytes, err := os.ReadFile(keypath)
 
@@ -26,13 +32,24 @@ func GetKeyAuthMethod(keypath string) (gossh.AuthMethod, error) {
 
 	log.Debug().Str("key", keypath).Msg("Private key needs a password")
 
-	pass, err := PromptForKeyPassword(keypath)
-
-	if err != nil {
-		return nil, err
+	if pwds == nil {
+		return nil, ErrEmptyKeyPassword
 	}
 
-	signer, err = gossh.ParsePrivateKeyWithPassphrase(keyBytes, pass)
+	if pwds.KeyPassword == "" {
+
+		if !pwds.CanPrompt {
+			return nil, fmt.Errorf("Key requires password, but no password was given and no prompt is enabled: %w", ErrEmptyKeyPassword)
+		}
+
+		if pass, err := PromptForKeyPassword(keypath); err != nil {
+			return nil, err
+		} else {
+			pwds.KeyPassword = string(pass)
+		}
+	}
+
+	signer, err = gossh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(pwds.KeyPassword))
 
 	if err != nil {
 		log.Debug().Err(err).Str("key", keypath).Msg("Failed to parse private key with password")

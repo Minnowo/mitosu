@@ -35,6 +35,22 @@ func main() {
 				Description: "See stats of a server",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
+						Name:     "no-prompt",
+						Usage:    "Never prompt for passwords, all passwords must be supplied via environment variables or command flags.",
+						Required: false,
+					},
+					&cli.BoolFlag{
+						Name:     "no-pass-sudo",
+						Usage:    "Should be set if the remote user doesn't need a password for sudo.",
+						Required: false,
+					},
+					&cli.BoolFlag{
+						Name:     "json",
+						Aliases:  []string{"j"},
+						Usage:    "Output in JSON for parsing by another tool.",
+						Required: false,
+					},
+					&cli.BoolFlag{
 						Name:     "no-color",
 						Aliases:  []string{"n"},
 						Usage:    "When set, don't show any color or use ANSI Escape Codes.",
@@ -50,11 +66,11 @@ func main() {
 					&cli.BoolFlag{
 						Name:     "with-root",
 						Aliases:  []string{"R"},
-						Usage:    "Elevate the remote shell using sudo, and prompt for a root password.",
+						Usage:    "Elevate the remote shell using sudo.",
 						Required: false,
 					},
 					&cli.StringFlag{
-						Name:     "ssh-config",
+						Name:     "config",
 						Aliases:  []string{"c"},
 						Usage:    "The SSH config file path.",
 						Value:    "~/.ssh/config",
@@ -87,9 +103,21 @@ func main() {
 						Required: false,
 					},
 					&cli.StringFlag{
+						Name:     "user-pass",
+						Usage:    "The remote user password.",
+						Sources:  cli.EnvVars("MITOSU_USER_PASSWORD"),
+						Required: false,
+					},
+					&cli.StringFlag{
 						Name:     "key",
 						Aliases:  []string{"i"},
 						Usage:    "The SSH private key file path.",
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "key-pass",
+						Usage:    "The SSH private key password.",
+						Sources:  cli.EnvVars("MITOSU_KEY_PASSWORD"),
 						Required: false,
 					},
 				},

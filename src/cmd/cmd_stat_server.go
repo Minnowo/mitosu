@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mitosu/src/data"
 	cf "mitosu/src/display"
@@ -25,16 +27,25 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 	withRoot := c.Value("with-root").(bool)
 	poll := c.Value("poll").(uint)
 
-	sshConfig := ssh.ExpandPath(c.Value("ssh-config").(string))
+	jsonOutput := c.Value("json").(bool)
+	noPrompt := c.Value("no-prompt").(bool)
+	noPassSudo := c.Value("no-pass-sudo").(bool)
+
+	sshConfig := ssh.ExpandPath(c.Value("config").(string))
 	sshAlias := c.Value("alias").(string)
 	sshHost := c.Value("host").(string)
 	sshPort := c.Value("port").(int)
 	sshUser := c.Value("user").(string)
 	sshKey := ssh.ExpandPath(c.Value("key").(string))
+	sshUserPassword := c.Value("user-pass").(string)
+	sshKeyPassword := c.Value("key-pass").(string)
 
 	log.Debug().
 		Uint("poll", poll).
+		Bool("no-pass-sudo", noPassSudo).
 		Bool("with-root", withRoot).
+		Bool("json", jsonOutput).
+		Bool("no-prompt", noPrompt).
 		Bool("color", !noColor).
 		Str("path", sshConfig).
 		Str("alias", sshAlias).
@@ -44,15 +55,21 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 		Str("key", sshKey).
 		Msg("About to run stat")
 
-	section := ssh.Section{
-		Name:         "mitosu CLI",
-		Hostname:     sshHost,
-		Port:         sshPort,
-		User:         sshUser,
-		IdentityFile: sshKey,
+	client := ssh.SSHClient{
+		Config: ssh.Section{
+			Name:         "mitosu CLI",
+			Hostname:     sshHost,
+			Port:         sshPort,
+			User:         sshUser,
+			IdentityFile: sshKey,
+		},
+		Passwords: ssh.SSHPasswords{
+			KeyPassword:  sshKeyPassword,
+			UserPassword: sshUserPassword,
+			CanPrompt:    !noPrompt,
+		},
+		SudoRequiresPassword: !noPassSudo,
 	}
-
-	var client ssh.SSHClient
 
 	if sshAlias != "" {
 
@@ -76,51 +93,32 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 				Str("key", section.IdentityFile).
 				Msg("Found ssh host alias")
 
-			if c, err := ssh.NewClient(section); err != nil {
+			client.Config = section
+
+			if err := client.Connect(); err != nil {
 				return err
 			} else {
-				client = c
 				break
 			}
 		}
-	} else {
-
-		if c, err := ssh.NewClient(section); err != nil {
-			return err
-		} else {
-			client = c
-		}
+	} else if err := client.Connect(); err != nil {
+		return err
 	}
 
 	if client.Client == nil {
 		return fmt.Errorf("Could not get ssh connection")
 	}
+	defer client.Close()
 
-	var sh shell.Shell
-
-	if withRoot {
-
-		pd, err := ssh.PromptForPasswordF(
-			"Enter the sudo password for %s@%s: ",
-			client.Config.Hostname, client.Config.User,
-		)
-
-		if err != nil {
-			return err
-		}
-
-		sh = shell.NewPosixShell(string(pd))
-	} else {
-
-		sh = shell.NewPosixShell("")
+	if err := client.PromptRootPass(); err != nil {
+		return err
 	}
 
-	shellType := sh.GetType()
+	sh := shell.PosixShell{}
 	allCmds := make([]shell.ShellCmd, 0)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	defer client.Close()
 
 	if !noColor {
 		cf.SetColorEnabled(cf.SupportsANSI())
@@ -128,7 +126,7 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 
 	output := cf.VirtualTerm{
 		FD:           int(os.Stdin.Fd()),
-		SupportsAnsi: !noColor && cf.SupportsANSI(),
+		SupportsAnsi: cf.SupportsANSI(),
 	}
 
 	var ticker *time.Ticker
@@ -155,7 +153,7 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 
 		defer func() {
 			output.Restore()
-			PrintStats(&output, systemStats)
+			PrintStats(jsonOutput, &output, systemStats)
 			log.Debug().Err(err).Msg("Virtual term closed")
 		}()
 	}
@@ -165,13 +163,13 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 
 		for _, stat := range systemStats {
 
-			for _, cmd := range stat.GetCmds(shellType) {
+			for _, cmd := range stat.GetCmds(sh.GetType()) {
 
 				allCmds = append(allCmds, cmd)
 			}
 		}
 
-		results, err := client.RunCommands(sh, allCmds)
+		results, err := client.RunCommands(withRoot, sh, allCmds)
 
 		if err != nil {
 			return err
@@ -180,12 +178,12 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 		i := 0
 		for _, stat := range systemStats {
 
-			n := stat.CmdCount(shellType)
-			stat.ParseCmdOutput(shellType, results[i:i+n])
+			n := stat.CmdCount(sh.GetType())
+			stat.ParseCmdOutput(sh.GetType(), results[i:i+n])
 			i += n
 		}
 
-		PrintStats(&output, systemStats)
+		PrintStats(jsonOutput, &output, systemStats)
 
 		if poll <= 0 {
 			break
@@ -202,12 +200,30 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 	return nil
 }
 
-func PrintStats(output *cf.VirtualTerm, stats []data.SystemStat) {
+func PrintStats(asJson bool, output *cf.VirtualTerm, stats []data.SystemStat) {
 
 	output.Clear()
 
-	for _, stat := range stats {
-		PrintStat(output, stat)
+	if asJson {
+
+		b, err := json.MarshalIndent(stats, "", "    ")
+
+		if err != nil {
+
+			output.Line("Error encoding json: %s", err)
+
+		} else {
+
+			for line := range bytes.SplitSeq(b, []byte{'\n'}) {
+				output.Line("%s", string(line))
+			}
+		}
+
+	} else {
+
+		for _, stat := range stats {
+			PrintStat(output, stat)
+		}
 	}
 
 	output.UpdateScreenSize()

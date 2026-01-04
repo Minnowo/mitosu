@@ -13,32 +13,40 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-type SSHClient struct {
-	*gossh.Client
-	Config Section
+type SSHPasswords struct {
+	UserPassword string
+	KeyPassword  string
+	CanPrompt    bool
 }
 
-func NewClient(s Section) (SSHClient, error) {
+type SSHClient struct {
+	*gossh.Client
+	Config               Section
+	Passwords            SSHPasswords
+	SudoRequiresPassword bool
+}
+
+func (s *SSHClient) Connect() error {
 
 	authMethods := make([]gossh.AuthMethod, 0, 3)
 
-	if m, err := GetKeyAuthMethod(s.IdentityFile); err == nil {
+	if m, err := GetKeyAuthMethod(s.Config.IdentityFile, &s.Passwords); err == nil {
 		authMethods = append(authMethods, m)
 	} else {
 		log.Debug().Err(err).Msg("Could not get key auth method")
 	}
 
-	if m, err := GetAgentAuthMethod(s.User, s.Hostname); err == nil {
+	if m, err := GetAgentAuthMethod(s.Config.User, s.Config.Hostname); err == nil {
 		authMethods = append(authMethods, m)
 	} else {
 		log.Debug().Err(err).Msg("Could not get ssh agent auth method")
 	}
 
-	m := GetPasswordAuthMethod(s.User, s.Hostname)
+	m := GetPasswordAuthMethod(s.Config.User, s.Config.Hostname, &s.Passwords)
 	authMethods = append(authMethods, m)
 
 	config := &gossh.ClientConfig{
-		User: s.User,
+		User: s.Config.User,
 		Auth: authMethods,
 		HostKeyCallback: func(hostname string, _ net.Addr, _ gossh.PublicKey) error {
 			log.Debug().Str("host", hostname).Msg("Connecting to remote")
@@ -46,23 +54,45 @@ func NewClient(s Section) (SSHClient, error) {
 		},
 	}
 
-	addr := s.Hostname + ":" + strconv.Itoa(s.Port)
+	addr := s.Config.Hostname + ":" + strconv.Itoa(s.Config.Port)
 	client, err := gossh.Dial("tcp", addr, config)
 
 	if err != nil {
-		client = nil
+		return err
 	}
 
-	sshClient := SSHClient{
-		Client: client,
-		Config: s,
+	if s.Client != nil {
+		s.Client.Close()
 	}
 
-	return sshClient, err
+	s.Client = client
+
+	return nil
 }
 
 func (s *SSHClient) Close() error {
 	s.Client.Close()
+	return nil
+}
+
+func (s *SSHClient) PromptRootPass() error {
+
+	if s.SudoRequiresPassword && s.Passwords.UserPassword == "" {
+
+		if !s.Passwords.CanPrompt {
+			return fmt.Errorf("Root shell requires sudo password: %w", ErrUserEmptyPassword)
+		}
+
+		pass, err := PromptForPasswordF("Enter %s@%s's sudo password: ",
+			s.Config.User, s.Config.Hostname)
+
+		if err != nil {
+			return fmt.Errorf("Root shell requires sudo password: %w", err)
+		} else {
+			s.Passwords.UserPassword = string(pass)
+		}
+	}
+
 	return nil
 }
 
@@ -87,7 +117,7 @@ func (s *SSHClient) RunCommand(command string) (string, error) {
 	return buf.String(), nil
 }
 
-func (s *SSHClient) RunCommands(sh shell.Shell, commands []shell.ShellCmd) ([]string, error) {
+func (s *SSHClient) RunCommands(withRoot bool, sh shell.Shell, commands []shell.ShellCmd) ([]string, error) {
 
 	log.Debug().
 		Int("shell", int(sh.GetType())).
@@ -118,7 +148,11 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []shell.ShellCmd) ([]st
 
 	var cmd string
 
-	if rootPw, err := sh.GetRootPassword(); err == nil {
+	if withRoot {
+
+		if err := s.PromptRootPass(); err != nil {
+			return nil, err
+		}
 
 		cmd = sh.RootSh()
 		log.Debug().Str("cmd", cmd).Msg("Shell has root password, running root shell")
@@ -127,14 +161,11 @@ func (s *SSHClient) RunCommands(sh shell.Shell, commands []shell.ShellCmd) ([]st
 			return nil, err
 		}
 
-		// provide the root password
-		fmt.Fprintln(stdin, rootPw)
+		if s.SudoRequiresPassword {
+			fmt.Fprintln(stdin, s.Passwords.UserPassword)
+		}
 
 	} else {
-
-		if err != shell.ErrNoRootAccess {
-			return nil, err
-		}
 
 		cmd = sh.Sh()
 		log.Debug().Str("cmd", cmd).Msg("Running shell")

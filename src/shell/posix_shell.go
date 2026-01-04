@@ -5,13 +5,6 @@ import (
 )
 
 type PosixShell struct {
-	rootPassword string
-}
-
-func NewPosixShell(rootPassword string) PosixShell {
-	return PosixShell{
-		rootPassword: rootPassword,
-	}
 }
 
 func (PosixShell) GetType() ShellType {
@@ -23,15 +16,6 @@ func (PosixShell) Sh() string {
 
 func (PosixShell) RootSh() string {
 	return "sudo -S sh"
-}
-
-func (s PosixShell) GetRootPassword() (string, error) {
-
-	if s.rootPassword != "" {
-		return s.rootPassword, nil
-	}
-
-	return "", ErrNoRootAccess
 }
 
 func (PosixShell) Echo(s string) string {
