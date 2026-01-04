@@ -154,8 +154,8 @@ func (s *SSHClient) RunCommands(withRoot bool, sh shell.Shell, commands []shell.
 			return nil, err
 		}
 
-		cmd = sh.RootSh()
-		log.Debug().Str("cmd", cmd).Msg("Shell has root password, running root shell")
+		cmd = sh.RootSh(s.SudoRequiresPassword)
+		log.Error().Str("cmd", cmd).Bool("no-pass-sudo", !s.SudoRequiresPassword).Msg("Running root shell")
 
 		if err := session.Start(cmd); err != nil {
 			return nil, err
@@ -186,7 +186,6 @@ func (s *SSHClient) RunCommands(withRoot bool, sh shell.Shell, commands []shell.
 		log.Debug().Str("cmd", cmd).Msg("Running")
 		fmt.Fprintln(stdin, cmd)
 	}
-
 	stdin.Close()
 
 	if err := session.Wait(); err != nil {

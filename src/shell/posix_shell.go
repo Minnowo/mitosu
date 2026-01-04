@@ -14,8 +14,12 @@ func (PosixShell) Sh() string {
 	return "sh"
 }
 
-func (PosixShell) RootSh() string {
-	return "sudo -S sh"
+func (PosixShell) RootSh(canPromptPassword bool) string {
+	if canPromptPassword {
+		return "sudo -S sh"
+	} else {
+		return "sudo -n sh"
+	}
 }
 
 func (PosixShell) Echo(s string) string {

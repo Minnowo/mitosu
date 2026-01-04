@@ -18,9 +18,10 @@ type Shell interface {
 	// Sh returns the platforms 'sh' command
 	Sh() string
 
-	// RootSh returns the platforms 'sudo -S su' command,
-	// It expects a stdin root password immediately after running the command.
-	RootSh() string
+	// RootSh returns the platforms 'sudo su' command,
+	// If canPromptPassword is false, the commmand will be the platforms non-interactive `sudo -n sh` command,
+	// If canPromptPassword is true, the command will be the platforms interactive `sudo -P sh` command, exppecting the root password on stdin.
+	RootSh(canPromptPassword bool) string
 
 	// Echo returns the platforms 'echo' command echoing the given string
 	Echo(s string) string
