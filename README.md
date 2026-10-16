@@ -44,6 +44,24 @@ container or a gap over 15 minutes. Gaps, lost samples, reboots and
 container changes are recorded as events. A failed or interrupted pull
 keeps what it stored and the next one continues from there.
 
+## Server mode
+
+`mitosu serve` pulls every server listed in `~/.config/mitosu/mitosu.conf`
+on a timer and serves a JSON API (the web UI follows) on 127.0.0.1:7878,
+behind a login (`mitosu passwd`). See [docs/running.md](docs/running.md)
+and the commented [deploy/mitosu.conf](deploy/mitosu.conf);
+`mitosu check-config` shows the settings in effect.
+
+mitosu writes only the database and the password file next to it, and
+reads only the config file. To keep them anywhere you like:
+
+```
+mitosu serve --config /srv/mitosu/mitosu.conf --db /srv/mitosu/history.db
+```
+
+`--db` works on `pull`, `serve`, `passwd` and `check-config` and wins
+over the config's `db` line.
+
 ## Connecting
 
 `--alias <name>` reads `~/.ssh/config` and `/etc/ssh/ssh_config` (or only

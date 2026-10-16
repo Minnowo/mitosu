@@ -5,6 +5,7 @@ package ssh
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -56,6 +58,11 @@ type SSHClient struct {
 // DefaultHandshakeTimeout (see the fields to override them). On
 // success it replaces any previous connection.
 func (s *SSHClient) Connect() error {
+	return s.ConnectContext(context.Background())
+}
+
+// ConnectContext is Connect that gives up as soon as ctx is done.
+func (s *SSHClient) ConnectContext(ctx context.Context) error {
 
 	hostKeyCallback, hostKeyAlgorithms := HostKeyCheck(s.Config.KnownHostsFiles, s.Config.KnownHostsAddress(), s.Config.VerifyHint())
 
@@ -85,7 +92,7 @@ func (s *SSHClient) Connect() error {
 
 	addr := net.JoinHostPort(s.Config.Hostname, strconv.Itoa(s.Config.Port))
 	log.Debug().Str("addr", addr).Str("user", s.Config.User).Msg("Connecting")
-	client, err := dial(addr, config, handshake)
+	client, err := dial(ctx, addr, config, handshake)
 
 	if err != nil {
 		return err
@@ -102,11 +109,15 @@ func (s *SSHClient) Connect() error {
 
 // dial connects to addr within config.Timeout, then runs the SSH
 // handshake within handshake (no limit if 0).
-func dial(addr string, config *gossh.ClientConfig, handshake time.Duration) (*gossh.Client, error) {
-	conn, err := net.DialTimeout("tcp", addr, config.Timeout)
+func dial(ctx context.Context, addr string, config *gossh.ClientConfig, handshake time.Duration) (*gossh.Client, error) {
+	dialer := net.Dialer{Timeout: config.Timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
+	// Closing the connection ends a handshake still running when ctx ends.
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
 	if handshake > 0 {
 		if err := conn.SetDeadline(time.Now().Add(handshake)); err != nil {
 			conn.Close()
@@ -181,10 +192,44 @@ type ExecResult struct {
 // could not be started.
 func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Reader) error) (ExecResult, error) {
 	log.Debug().Str("command", command).Msg("Running command")
-	session, err := s.Client.NewSession()
+
+	// The deadline covers opening the session too: a server can leave a
+	// channel open request unanswered. Until a session exists, the only
+	// way to stop waiting is to drop the connection.
+	var mu sync.Mutex
+	var session *gossh.Session
+	done := make(chan struct{})
+	var timedOut atomic.Bool
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-time.After(timeout):
+		}
+		timedOut.Store(true)
+		mu.Lock()
+		sess := session
+		mu.Unlock()
+		if sess == nil {
+			s.Client.Close()
+			return
+		}
+		closeSession(sess)
+		select {
+		case <-done:
+		case <-time.After(execGrace):
+			s.Client.Close()
+		}
+	}()
+	defer close(done)
+
+	sess, err := s.Client.NewSession()
 	if err != nil {
-		return ExecResult{Status: -1}, err
+		return ExecResult{Status: -1, TimedOut: timedOut.Load()}, err
 	}
+	mu.Lock()
+	session = sess
+	mu.Unlock()
 
 	stderr := &cappedBuffer{max: maxStderr}
 	session.Stderr = stderr
@@ -197,23 +242,6 @@ func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Rea
 		closeSession(session)
 		return ExecResult{Status: -1}, err
 	}
-
-	done := make(chan struct{})
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-done:
-			return
-		case <-time.After(timeout):
-		}
-		timedOut.Store(true)
-		closeSession(session)
-		select {
-		case <-done:
-		case <-time.After(execGrace):
-			s.Client.Close()
-		}
-	}()
 
 	readErr := read(stdout)
 	// Stop a command that is still sending (read gave up early); after a
@@ -230,7 +258,6 @@ func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Rea
 		s.Client.Close()
 		waitErr = <-waited
 	}
-	close(done)
 
 	res := ExecResult{Stderr: stderr.String(), ReadErr: readErr, TimedOut: timedOut.Load()}
 	var exitErr *gossh.ExitError

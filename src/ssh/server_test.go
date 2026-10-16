@@ -45,6 +45,13 @@ func startSSHServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.Pu
 // through exec (if not nil).
 func startExecServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.PublicKey, exec execHandler) *testSSHServer {
 	t.Helper()
+	return startServer(t, hostKeys, authorized, exec, false)
+}
+
+// startServer is startExecServer that, with hang, never answers a
+// request to open a channel.
+func startServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.PublicKey, exec execHandler, hang bool) *testSSHServer {
+	t.Helper()
 	srv := &testSSHServer{}
 	config := &gossh.ServerConfig{
 		PublicKeyCallback: func(_ gossh.ConnMetadata, key gossh.PublicKey) (*gossh.Permissions, error) {
@@ -81,6 +88,9 @@ func startExecServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.P
 				go gossh.DiscardRequests(reqs)
 				go func() {
 					for ch := range chans {
+						if hang {
+							continue
+						}
 						if exec == nil || ch.ChannelType() != "session" {
 							ch.Reject(gossh.Prohibited, "test server")
 							continue

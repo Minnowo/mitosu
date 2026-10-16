@@ -146,7 +146,7 @@ func openDB(t *testing.T) *store.DB {
 // eventRanges returns "from-to" of each event kind (the last of a kind).
 func eventRanges(t *testing.T, db *store.DB) map[string]string {
 	t.Helper()
-	events, err := db.Events("web", 0, 1<<62)
+	events, err := db.Events("web", 0, 1<<62, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -62,34 +62,41 @@ func main() {
 			},
 			{
 				Name:  "serve",
-				Usage: "Pull every configured host on a timer (server mode)",
+				Usage: "Pull every configured host on a timer and serve the web API (server mode)",
 				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "config",
-						Usage: "The config file. Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf.",
+					configFlag(),
+					dbFlag(),
+					&cli.BoolFlag{
+						Name:  "no-login",
+						Usage: "Serve without a login, whatever the config says.",
 					},
 				},
 				Action: cmd.CmdServe,
 			},
 			{
-				Name:  "check-config",
-				Usage: "Check mitosu.conf and print the settings serve would use",
+				Name:  "passwd",
+				Usage: "Set the web UI password (asks twice, or reads one line with --stdin)",
 				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "config",
-						Usage: "The config file. Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf.",
+					configFlag(),
+					dbFlag(),
+					&cli.BoolFlag{
+						Name:  "stdin",
+						Usage: "Read the password from the first line of stdin instead of asking.",
 					},
 				},
+				Action: cmd.CmdPasswd,
+			},
+			{
+				Name:   "check-config",
+				Usage:  "Check mitosu.conf and print the settings serve would use",
+				Flags:  []cli.Flag{configFlag(), dbFlag()},
 				Action: cmd.CmdCheckConfig,
 			},
 			{
 				Name:  "pull",
 				Usage: "Store a server's new kanshi samples in the local history",
 				Flags: append(connectionFlags(),
-					&cli.StringFlag{
-						Name:  "db",
-						Usage: "The history database. Default: $XDG_DATA_HOME/mitosu/mitosu.db, else ~/.local/share/mitosu/mitosu.db.",
-					},
+					dbFlag(),
 				),
 				Action: cmd.CmdPull,
 			},
@@ -233,5 +240,22 @@ func connectionFlags() []cli.Flag {
 			Sources:  cli.EnvVars("MITOSU_KEY_PASSWORD"),
 			Required: false,
 		},
+	}
+}
+
+// configFlag is the --config flag of the commands that read mitosu.conf.
+func configFlag() cli.Flag {
+	return &cli.StringFlag{
+		Name:  "config",
+		Usage: "The config file. Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf.",
+	}
+}
+
+// dbFlag is the --db flag: the history database, overriding the config's
+// db line (the password file lives next to it).
+func dbFlag() cli.Flag {
+	return &cli.StringFlag{
+		Name:  "db",
+		Usage: "The history database (the password file is kept next to it). Default: the config's db, else $XDG_DATA_HOME/mitosu/mitosu.db, else ~/.local/share/mitosu/mitosu.db.",
 	}
 }

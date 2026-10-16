@@ -3,11 +3,14 @@
 package main
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 var binary string
@@ -56,5 +59,76 @@ func TestCheckConfig(t *testing.T) {
 	out, err = exec.Command(binary, "check-config", "--config", bad).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "line 2") {
 		t.Fatalf("bad config: %v\n%s", err, out)
+	}
+}
+
+func TestDBFlagOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "m.conf")
+	if err := os.WriteFile(conf, []byte("host = web\ndb = /somewhere/else.db\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(dir, "mine.db")
+	out, err := exec.Command(binary, "check-config", "--config", conf, "--db", db).Output()
+	if err != nil || !strings.Contains(string(out), "db = "+db+"\n") {
+		t.Fatalf("check-config --db: %v\n%s", err, out)
+	}
+}
+
+func TestServeFailsFastWhenThePortIsTaken(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "m.conf")
+	// 10.255.255.1 never answers: a pull would hang in connect.
+	text := "host = 10.255.255.1\nlisten = " + taken.Addr().String() + "\nlogin = off\n"
+	if err := os.WriteFile(conf, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "serve", "--config", conf, "--db", filepath.Join(dir, "h.db"))
+	cmd.Env = append(os.Environ(), "HOME="+dir)
+	start := time.Now()
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "address already in use") {
+		t.Fatalf("serve on a taken port: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "Serving") {
+		t.Fatalf("serve announced itself before its port was open:\n%s", out)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("took %v to fail", elapsed)
+	}
+}
+
+func TestServeStopsWhileConnecting(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "m.conf")
+	// 10.255.255.1 never answers: the first pull waits in connect.
+	text := "host = 10.255.255.1\nlisten = 127.0.0.1:" + freePort(t) + "\nlogin = off\n"
+	if err := os.WriteFile(conf, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "serve", "--config", conf, "--db", filepath.Join(dir, "h.db"))
+	cmd.Env = append(os.Environ(), "HOME="+dir)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("serve did not stop within 5 s of SIGTERM while connecting")
 	}
 }

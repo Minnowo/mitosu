@@ -9,6 +9,7 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -43,6 +44,7 @@ func Parse(text string) (Config, error) {
 	}
 	seen := map[string]int{}
 	var tiers []store.Tier
+	var tierLines []int
 	for i, raw := range strings.Split(text, "\n") {
 		n := i + 1
 		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
@@ -99,16 +101,17 @@ func Parse(text string) (Config, error) {
 				return Config{}, &LineError{n, err.Error()}
 			}
 			tiers = append(tiers, t)
+			tierLines = append(tierLines, n)
 		case "listen":
-			if _, _, err := net.SplitHostPort(value); err != nil {
-				return Config{}, &LineError{n, fmt.Sprintf("listen %q: want host:port", value)}
+			if err := checkListen(value); err != nil {
+				return Config{}, &LineError{n, err.Error()}
 			}
 			cfg.Listen = value
 		case "allowed_host":
 			if !hostPattern.MatchString(value) || strings.Contains(value, ":") {
 				return Config{}, &LineError{n, fmt.Sprintf("allowed_host %q: want a host name without port", value)}
 			}
-			cfg.AllowedHosts = append(cfg.AllowedHosts, value)
+			cfg.AllowedHosts = append(cfg.AllowedHosts, strings.ToLower(strings.TrimSuffix(value, ".")))
 		case "login":
 			switch value {
 			case "on":
@@ -133,8 +136,12 @@ func Parse(text string) (Config, error) {
 		}
 	}
 	if tiers != nil {
-		if err := store.ValidateTiers(tiers); err != nil {
-			return Config{}, &LineError{seen["tier"], "tiers: " + err.Error()}
+		// Validate growing prefixes so the error names the first tier
+		// line that breaks the rules.
+		for i := range tiers {
+			if err := store.ValidateTiers(tiers[:i+1]); err != nil {
+				return Config{}, &LineError{tierLines[i], "tiers: " + err.Error()}
+			}
 		}
 		cfg.Tiers = tiers
 	}
@@ -179,4 +186,21 @@ func absPath(value string) (string, error) {
 		return "", fmt.Errorf("%q is not an absolute path", value)
 	}
 	return filepath.Clean(p), nil
+}
+
+// checkListen accepts host:port with a port of 1 to 65535 and a host that
+// is empty (every address), an IP address without zone, or a name.
+func checkListen(value string) error {
+	host, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return fmt.Errorf("listen %q: want host:port", value)
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil || p < 1 || p > 65535 {
+		return fmt.Errorf("listen %q: port must be 1 to 65535", value)
+	}
+	if host == "" || (net.ParseIP(host) != nil && !strings.Contains(host, "%")) || hostPattern.MatchString(host) && !strings.ContainsAny(host, ":@") {
+		return nil
+	}
+	return fmt.Errorf("listen %q: want an IP address or a host name", value)
 }

@@ -21,12 +21,17 @@ type Event struct {
 	Detail string
 }
 
-// Events returns host's events with fromMs <= TimeMs < toMs, oldest
-// first. A host never pulled has none.
-func (db *DB) Events(host string, fromMs, toMs int64) ([]Event, error) {
-	rows, err := db.sql.Query(`SELECT e.t, e.kind, e.store, e.seq_from, e.seq_to, e.subject, e.detail
+// Events returns at most limit of host's events with fromMs <= TimeMs <
+// toMs: the newest ones, oldest first. A host never pulled has none.
+func (db *DB) Events(host string, fromMs, toMs int64, limit int) ([]Event, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("store: event limit %d", limit)
+	}
+	rows, err := db.sql.Query(`SELECT t, kind, store, seq_from, seq_to, subject, detail FROM (
+		SELECT e.id, e.t, e.kind, e.store, e.seq_from, e.seq_to, e.subject, e.detail
 		FROM events e JOIN hosts h ON h.id = e.host_id
-		WHERE h.name = ? AND e.t >= ? AND e.t < ? ORDER BY e.t, e.id`, host, fromMs, toMs)
+		WHERE h.name = ? AND e.t >= ? AND e.t < ? ORDER BY e.t DESC, e.id DESC LIMIT ?
+	) ORDER BY t, id`, host, fromMs, toMs, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}

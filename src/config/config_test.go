@@ -60,6 +60,18 @@ func TestEveryKey(t *testing.T) {
 	}
 }
 
+func TestListenAndAllowedHost(t *testing.T) {
+	for _, v := range []string{":7878", "0.0.0.0:7878", "[::]:7878", "[::1]:7878", "mitosu.lan:443"} {
+		if _, err := Parse("listen = " + v + "\n"); err != nil {
+			t.Errorf("listen %s: %v", v, err)
+		}
+	}
+	cfg, err := Parse("allowed_host = Mitosu.LAN.\n")
+	if err != nil || len(cfg.AllowedHosts) != 1 || cfg.AllowedHosts[0] != "mitosu.lan" {
+		t.Fatalf("allowed_host %v %v", cfg.AllowedHosts, err)
+	}
+}
+
 func TestHomeInPaths(t *testing.T) {
 	t.Setenv("HOME", "/home/tester")
 	cfg, err := Parse("db = ~/data/m.db\n")
@@ -70,24 +82,30 @@ func TestHomeInPaths(t *testing.T) {
 
 func TestMistakesAreRefusedWithTheirLine(t *testing.T) {
 	cases := map[string]int{
-		"hots = web\n":                             1,
-		"host web\n":                               1,
-		"host =\n":                                 1,
-		"# c\nhost = -oProxyCommand=x\n":           2,
-		"host = a b\n":                             1,
-		"host = web\nhost = web\n":                 2,
-		"pull_interval = 10s\n":                    1,
-		"pull_interval = 2d\n":                     1,
-		"pull_interval = 5m\npull_interval = 6m\n": 2,
-		"pull_interval = 05m\n":                    1,
-		"pull_interval = 5\n":                      1,
-		"db = relative/m.db\n":                     1,
-		"tier = raw\n":                             1,
-		"tier = 1x 2d\n":                           1,
-		"tier = 1m 1d\ntier = raw 2d\n":            2,
-		"listen = 7878\n":                          1,
-		"allowed_host = a.lan:80\n":                1,
-		"login = yes\n":                            1,
+		"tier = raw 2d\ntier = 1m 1d\ntier = 1h forever\n": 2,
+		"listen = 127.0.0.1:99999\n":                       1,
+		"listen = 127.0.0.1:http\n":                        1,
+		"listen = [fe80::1%eth0]:80\n":                     1,
+		"tier = raw 585y\n":                                1,
+		"pull_interval = 213504d\n":                        1,
+		"hots = web\n":                                     1,
+		"host web\n":                                       1,
+		"host =\n":                                         1,
+		"# c\nhost = -oProxyCommand=x\n":                   2,
+		"host = a b\n":                                     1,
+		"host = web\nhost = web\n":                         2,
+		"pull_interval = 10s\n":                            1,
+		"pull_interval = 2d\n":                             1,
+		"pull_interval = 5m\npull_interval = 6m\n":         2,
+		"pull_interval = 05m\n":                            1,
+		"pull_interval = 5\n":                              1,
+		"db = relative/m.db\n":                             1,
+		"tier = raw\n":                                     1,
+		"tier = 1x 2d\n":                                   1,
+		"tier = 1m 1d\ntier = raw 2d\n":                    2,
+		"listen = 7878\n":                                  1,
+		"allowed_host = a.lan:80\n":                        1,
+		"login = yes\n":                                    1,
 	}
 	for text, line := range cases {
 		_, err := Parse(text)
@@ -111,7 +129,7 @@ func TestDurations(t *testing.T) {
 			t.Errorf("%s: %v %v", s, d, err)
 		}
 	}
-	for _, s := range []string{"", "m", "0m", "-1m", "1.5h", "1M", "101y", "99999999999s", "+5m"} {
+	for _, s := range []string{"", "m", "0m", "-1m", "1.5h", "1M", "101y", "99999999999s", "+5m", "585y", "213504d", "30501w", "5124096h", "307445735m"} {
 		if _, err := parseDuration(s); err == nil {
 			t.Errorf("%q accepted", s)
 		}

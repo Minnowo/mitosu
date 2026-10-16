@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -208,7 +210,7 @@ func TestE2EPullTwice(t *testing.T) {
 	}
 }
 
-func TestE2EServePullsAndStops(t *testing.T) {
+func TestE2EServeWithLogin(t *testing.T) {
 	srv := testServer(t)
 	home := t.TempDir()
 	sshDir := filepath.Join(home, ".ssh")
@@ -220,27 +222,75 @@ func TestE2EServePullsAndStops(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(sshConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	db := filepath.Join(home, "history.db")
+	port := freePort(t)
+	db := filepath.Join(home, "data", "history.db")
 	conf := filepath.Join(home, "mitosu.conf")
-	if err := os.WriteFile(conf, []byte("host = testbox\npull_interval = 30s\ndb = "+db+"\n"), 0o600); err != nil {
+	confText := "host = testbox\npull_interval = 30s\ndb = " + db + "\nlisten = 127.0.0.1:" + port + "\n"
+	if err := os.WriteFile(conf, []byte(confText), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	env := append(os.Environ(), "HOME="+home, "SSH_AUTH_SOCK=", "XDG_CONFIG_HOME=", "XDG_DATA_HOME=")
+
+	// Login is on by default: no password, no start.
+	refuse := exec.Command(binary, "serve", "--config", conf)
+	refuse.Env = env
+	if out, err := refuse.CombinedOutput(); err == nil || !strings.Contains(string(out), "mitosu passwd") {
+		t.Fatalf("serve without a password: %v\n%s", err, out)
+	}
+	passwd := exec.Command(binary, "passwd", "--config", conf, "--stdin")
+	passwd.Env = env
+	passwd.Stdin = strings.NewReader("correct horse\n")
+	if out, err := passwd.CombinedOutput(); err != nil {
+		t.Fatalf("passwd: %v\n%s", err, out)
 	}
 
 	cmd := exec.Command(binary, "serve", "--config", conf)
-	cmd.Env = append(os.Environ(), "HOME="+home, "SSH_AUTH_SOCK=", "XDG_CONFIG_HOME=", "XDG_DATA_HOME=")
+	cmd.Env = env
 	var logs syncBuffer
 	cmd.Stderr = &logs
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(60 * time.Second)
-	for !strings.Contains(logs.String(), "Pulled") {
-		if time.Now().After(deadline) {
-			cmd.Process.Kill()
-			t.Fatalf("no pull within 60 s:\n%s", logs.String())
+	defer cmd.Process.Kill()
+	waitLog(t, &logs, "Pulled")
+
+	base := "http://127.0.0.1:" + port
+	call := func(method, path, body string, cookie *http.Cookie) *http.Response {
+		req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(100 * time.Millisecond)
+		req.Header.Set("X-Mitosu", "1")
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
 	}
+	if resp := call("GET", "/api/hosts", "", nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("hosts without login: %d", resp.StatusCode)
+	}
+	resp := call("POST", "/api/login", `{"password":"correct horse"}`, nil)
+	if resp.StatusCode != http.StatusNoContent || len(resp.Cookies()) != 1 {
+		t.Fatalf("login: %d", resp.StatusCode)
+	}
+	resp = call("GET", "/api/hosts", "", resp.Cookies()[0])
+	var hosts []struct {
+		Name         string `json:"name"`
+		LastSampleMs int64  `json:"last_sample_ms"`
+		LastError    string `json:"last_error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&hosts); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(hosts) != 1 || hosts[0].Name != "testbox" || hosts[0].LastSampleMs == 0 || hosts[0].LastError != "" {
+		t.Fatalf("hosts %+v", hosts)
+	}
+
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
@@ -250,8 +300,28 @@ func TestE2EServePullsAndStops(t *testing.T) {
 	if !strings.Contains(logs.String(), "Stopped") {
 		t.Fatalf("no clean stop logged:\n%s", logs.String())
 	}
-	if info, err := os.Stat(db); err != nil || info.Size() == 0 {
-		t.Fatalf("database not written: %v", err)
+}
+
+// freePort returns a TCP port that was free a moment ago.
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+}
+
+// waitLog waits up to 60 s for text in logs.
+func waitLog(t *testing.T, logs *syncBuffer, text string) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for !strings.Contains(logs.String(), text) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%q not logged within 60 s:\n%s", text, logs.String())
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

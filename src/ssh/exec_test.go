@@ -99,6 +99,25 @@ func TestExecSignal(t *testing.T) {
 	}
 }
 
+func TestExecTimeoutWhileOpeningTheSession(t *testing.T) {
+	host := newKey(t)
+	user := newKey(t)
+	srv := startServer(t, []gossh.Signer{host.signer}, []gossh.PublicKey{user.pub}, nil, true)
+	c := testClient(srv, knownHostFor(t, srv, host), []string{user.file(t, "")}, SSHPasswords{})
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	start := time.Now()
+	res, err := c.Exec("never runs", 300*time.Millisecond, func(r io.Reader) error { return nil })
+	if err == nil || !res.TimedOut {
+		t.Fatalf("result %+v err %v, want a timeout", res, err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("returned after %v", elapsed)
+	}
+}
+
 // execClient connects to a new in-process server running exec.
 func execClient(t *testing.T, exec execHandler) *SSHClient {
 	t.Helper()

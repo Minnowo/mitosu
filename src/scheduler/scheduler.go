@@ -34,8 +34,9 @@ type Conn interface {
 	Close() error
 }
 
-// Connector opens the connection to a host. It must not prompt.
-type Connector func(host string) (Conn, error)
+// Connector opens the connection to a host, giving up when ctx is done.
+// It must not prompt.
+type Connector func(ctx context.Context, host string) (Conn, error)
 
 // Puller pulls one host over an open connection (pull.Pull in serve).
 type Puller func(client pull.Runner, db *store.DB, host string, tiers []store.Tier, now func() time.Time) (pull.Result, error)
@@ -150,7 +151,12 @@ func (s *Scheduler) runHost(ctx context.Context, host string) {
 	defer closeClient()
 
 	failures := 0
-	failedBefore := false
+	// Restored from the history, so a restart that finds pulling working
+	// again still records it.
+	failedBefore, err := s.db.PullFailing(host)
+	if err != nil {
+		log.Warn().Err(err).Str("host", host).Msg("Reading the last pull status")
+	}
 	for {
 		s.setStatus(host, func(st *HostStatus) {
 			st.Pulling = true
@@ -162,12 +168,15 @@ func (s *Scheduler) runHost(ctx context.Context, host string) {
 		}
 		wait := s.interval
 		if err != nil {
-			closeClient()
-			failures++
-			wait = s.firstRetry << min(failures-1, 16)
-			if wait > s.interval {
-				wait = s.interval
+			// Keep a connection that still answers: the error may be the
+			// database's or kanshi's, not the link's.
+			clientMu.Lock()
+			if client != nil && !client.Alive(aliveTimeout) {
+				client = nil
 			}
+			clientMu.Unlock()
+			failures++
+			wait = retryWait(failures, s.firstRetry, s.interval)
 			log.Warn().Err(err).Str("host", host).Dur("retry_in", wait).Msg("Pull failed")
 			if !failedBefore {
 				s.recordStatus(host, true, err.Error())
@@ -215,7 +224,7 @@ func (s *Scheduler) pullOnce(ctx context.Context, host string, client *Conn, mu 
 		c = nil
 	}
 	if c == nil {
-		nc, err := s.connect(host)
+		nc, err := s.connect(ctx, host)
 		if err != nil {
 			return pull.Result{}, err
 		}
@@ -244,4 +253,14 @@ func (s *Scheduler) recordStatus(host string, failed bool, detail string) {
 	if err := s.db.RecordPullStatus(host, s.now().UnixMilli(), failed, detail); err != nil {
 		log.Warn().Err(err).Str("host", host).Msg("Recording pull status")
 	}
+}
+
+// retryWait is the wait after the given number of failures in a row
+// (1 or more): first, doubling with each failure, at most interval.
+func retryWait(failures int, first, interval time.Duration) time.Duration {
+	wait := first
+	for i := 1; i < failures && wait < interval; i++ {
+		wait *= 2
+	}
+	return min(wait, interval)
 }

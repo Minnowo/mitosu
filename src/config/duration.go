@@ -37,9 +37,10 @@ func parseDuration(s string) (time.Duration, error) {
 	if err != nil || n == 0 {
 		return 0, fmt.Errorf("duration %q: want a whole number above 0", s)
 	}
-	d := time.Duration(n) * unit
-	if d > maxDurationYears*365*24*time.Hour {
+	// Compare before multiplying: the product could wrap around.
+	limit := time.Duration(maxDurationYears) * 365 * 24 * time.Hour
+	if n > uint64(limit/unit) {
 		return 0, fmt.Errorf("duration %q: more than %d years", s, maxDurationYears)
 	}
-	return d, nil
+	return time.Duration(n) * unit, nil
 }

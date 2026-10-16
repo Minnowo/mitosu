@@ -96,7 +96,7 @@ urfave/cli/v3, x/crypto, x/term.
 | Privilege          | Live views run without sudo; on "permission denied" the UI says which group is missing (docker, adm/systemd-journal) or that `sudo -n` can be enabled per host; server mode never prompts for a password | Always sudo                                            | Least privilege; the service cannot type passwords                         | default   |
 | Host keys          | knownhosts from x/crypto against ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts (hashed entries and `[host]:port` supported); unknown or changed key refused with a message to run `ssh <host>` once | Prompt in CLI; accept-new                              | Never writes known_hosts; MITM refused                                     | user      |
 | Alerts             | Derived indicators in the UI only; no notifications in v1                                                                                                                      | Email, desktop notifications                           | Same "on-demand first" rule as kanshi                                      | default   |
-| Config             | `$XDG_CONFIG_HOME/mitosu/mitosu.conf` (or `--config`), strict `key = value` lines like kanshi's; `host = <ssh alias>` and `tier` repeatable; pull interval, data directory, listen, allowed_host, login, tls_cert, tls_key, live_views; flags override the file; `mitosu check-config` | TOML/YAML (dependency)                                 | No parser dependency; same habits as kanshi                                | default   |
+| Config             | `$XDG_CONFIG_HOME/mitosu/mitosu.conf` (or `--config`), strict `key = value` lines like kanshi's; `host = <ssh alias>` and `tier` repeatable; pull_interval, db, listen, allowed_host, login, tls_cert, tls_key; `--db` and `--no-login` override the file; `mitosu check-config` | TOML/YAML (dependency)                                 | No parser dependency; same habits as kanshi                                | default   |
 | Distribution       | Static binary (CGO_ENABLED=0) for the platforms modernc.org/sqlite supports; docs for systemd --user, Docker and a plain shell; an example Dockerfile in M7                   | Docker only; systemd only                              | Works anywhere (user, 2026-10-17)                                          | user      |
 | Tests              | Go tests at the CLI and HTTP API level; integration tests against kanshi's test server (127.0.0.1:2222, run by `../kanshi/testserver/run.sh`); kanshi's golden files copied to testdata/ with a check that they match | Mocks only                                             | Real sshd, real kanshi, real known_hosts handling                          | default   |
 
@@ -399,3 +399,52 @@ Each ends with check.sh green, an independent review, and a commit.
   modernc.org/sqlite v1.60.1 needs are kept (golang.org/x/sys v0.48.0,
   mattn/go-isatty v0.0.24, go 1.26 in go.mod; release builds need Go 1.26
   or newer).
+- 2026-10-17, M4 (server mode), in three commits. (1) mitosu.conf with
+  check-config: host, pull_interval (30s..24h, default 5m), db, tier
+  (repeatable; any tier line replaces the defaults), listen,
+  allowed_host, login, tls_cert/tls_key; durations are a number and one
+  unit (s, m, h, d, w, y). (2) src/scheduler: one loop and one kept SSH
+  connection per host, a keepalive check before each pull, retries after
+  30 s doubling to the pull interval, pull_failed / pull_ok events on
+  changes only, a pull-now trigger; serve stops cleanly on SIGINT or
+  SIGTERM, cutting off a running pull. Hosts connect through ~/.ssh/config
+  with prompting off. (3) src/web and src/auth: JSON API (/api/session,
+  login, logout, hosts, series, points, events, pull), every request
+  checked for its Host header (IP addresses, localhost, the listen name
+  and allowed_host; others 421) and every /api/ request for X-Mitosu: 1;
+  CSP and other security headers; 16 KiB bodies; login with one password
+  (argon2id, 64 MiB, 3 passes, in a 0600 file next to the database, set
+  by `mitosu passwd` or `--stdin`), sessions in memory (30 days, 64 at
+  most, HttpOnly, SameSite=Strict, Secure under TLS), 5 failed logins in
+  10 min lock logins for a minute, password checks one at a time; serve
+  refuses to start with login on and no password; --no-login; opt-in TLS
+  (TLS 1.2+). /api/points reads the finest tier that keeps the range and
+  has at most 20 stored rows per returned point, merged into round steps
+  (multiples of the tier resolution). Run notes in docs/running.md with
+  an example config and systemd user unit in deploy/. No web UI yet
+  (M5): / answers 404.
+- 2026-10-17, M4 review (independent subagent), 19 findings, all fixed;
+  each fix's test was checked to fail with the fix undone. Login limit:
+  per client address (one address cannot lock out another; behind a
+  reverse proxy all share the proxy's), one attempt in flight per
+  address counted before the check (30 parallel wrong logins had all
+  been checked), at most 8 checks queued. Every protected endpoint is
+  tested without a session; the TLS test builds the server as serve
+  does. allowed_host is lower-cased and loses a trailing dot. Events are
+  limited in SQL (newest 10,000). net/http's error lines go to zerolog.
+  serve opens its port (and loads the TLS certificate) before pulling, so
+  a taken port fails at once; connecting honours stop; a second Ctrl-C
+  ends the process. Exec's deadline covers opening the session. The
+  failing state of pulls is read back from the events at start, so a
+  restart still records pull_ok. A failed pull keeps a connection that
+  still answers. Durations are bounded before multiplying (585y had
+  wrapped to 21 days). A tier error names its own line. listen needs a
+  port 1..65535 and a zone-free IP or a name. Points are counted from
+  the range start (or the start of the first rollup bucket), never more
+  than max. The password file must be a regular file of the user running
+  mitosu with no access for others. Retry backoff is a tested function.
+  Brief corrections: there are no --tls-cert/--tls-key flags (TLS is
+  config only) and the key is db, not data_dir; added at the user's
+  request: --db on serve, passwd and check-config (as on pull), which
+  overrides the config's db, so `--config FILE --db FILE` keeps every
+  file mitosu writes where the user says.

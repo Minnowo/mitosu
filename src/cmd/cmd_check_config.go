@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
 
 	"mitosu/src/config"
+	"mitosu/src/ssh"
 	"mitosu/src/store"
 )
 
@@ -54,7 +56,8 @@ func CmdCheckConfig(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
-// loadConfig loads --config, or the default path.
+// loadConfig loads --config, or the default path, and applies --db (when
+// the command has it and it is given), which overrides the file's db.
 func loadConfig(c *cli.Command) (string, config.Config, error) {
 	path := c.String("config")
 	if path == "" {
@@ -65,7 +68,26 @@ func loadConfig(c *cli.Command) (string, config.Config, error) {
 		path = p
 	}
 	cfg, err := config.Load(path)
-	return path, cfg, err
+	if err != nil {
+		return path, cfg, err
+	}
+	if db := c.String("db"); db != "" {
+		abs, err := absPath(db)
+		if err != nil {
+			return path, cfg, fmt.Errorf("--db: %w", err)
+		}
+		cfg.DB = abs
+	}
+	return path, cfg, nil
+}
+
+// absPath expands ~ and makes path absolute.
+func absPath(path string) (string, error) {
+	p, err := ssh.ExpandPath(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(p)
 }
 
 // formatTier writes a tier the way the config file does.

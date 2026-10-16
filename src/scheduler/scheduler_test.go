@@ -62,7 +62,7 @@ func TestFailuresAreRetriedAndRecordedOnce(t *testing.T) {
 	waitFor(t, func() bool { return f.pulls.Load() == 1 })
 	cancel()
 	<-done
-	events, err := f.db.Events("web", 0, 1<<62)
+	events, err := f.db.Events("web", 0, 1<<62, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +102,65 @@ func TestStopCutsOffARunningPull(t *testing.T) {
 	}
 }
 
+func TestStopDuringConnect(t *testing.T) {
+	f := newFake()
+	f.hangConnect.Store(true)
+	s := f.scheduler(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return while connecting")
+	}
+}
+
+func TestRetryWait(t *testing.T) {
+	first, interval := 30*time.Second, 5*time.Minute
+	want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute, 5 * time.Minute}
+	for i, w := range want {
+		if got := retryWait(i+1, first, interval); got != w {
+			t.Errorf("failure %d: %v, want %v", i+1, got, w)
+		}
+	}
+	if got := retryWait(1_000_000, first, interval); got != interval {
+		t.Errorf("after many failures: %v", got)
+	}
+}
+
+func TestFailingStateSurvivesRestart(t *testing.T) {
+	f := newFake()
+	s := f.scheduler(t, time.Hour)
+	if err := f.db.RecordPullStatus("web", 1, true, "connection refused"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	waitFor(t, func() bool { return f.pulls.Load() == 1 })
+	cancel()
+	<-done
+	failing, err := f.db.PullFailing("web")
+	if err != nil || failing {
+		t.Fatalf("still failing after a good pull: %v %v", failing, err)
+	}
+}
+
+func TestBadPullKeepsALiveConnection(t *testing.T) {
+	f := newFake()
+	f.failPulls.Store(2)
+	s := f.scheduler(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	waitFor(t, func() bool { return f.pulls.Load() == 1 })
+	cancel()
+	<-done
+	if f.connects.Load() != 1 {
+		t.Fatalf("connected %d times; a live connection was dropped after pull errors", f.connects.Load())
+	}
+}
+
 // fake is a host whose connection and pulls the test controls.
 type fake struct {
 	db           *store.DB
@@ -111,6 +170,8 @@ type fake struct {
 	dead         atomic.Bool
 	block        atomic.Bool
 	blocked      atomic.Bool
+	hangConnect  atomic.Bool
+	failPulls    atomic.Int32
 }
 
 func newFake() *fake {
@@ -125,7 +186,11 @@ func (f *fake) scheduler(t *testing.T, interval time.Duration) *Scheduler {
 	}
 	t.Cleanup(func() { db.Close() })
 	f.db = db
-	connect := func(host string) (Conn, error) {
+	connect := func(ctx context.Context, host string) (Conn, error) {
+		if f.hangConnect.Load() {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
 		if f.failConnects.Load() > 0 {
 			f.failConnects.Add(-1)
 			return nil, errors.New("connection refused")
@@ -140,6 +205,10 @@ func (f *fake) scheduler(t *testing.T, interval time.Duration) *Scheduler {
 			f.blocked.Store(true)
 			<-c.closed
 			return pull.Result{}, errors.New("connection closed")
+		}
+		if f.failPulls.Load() > 0 {
+			f.failPulls.Add(-1)
+			return pull.Result{}, errors.New("database is locked")
 		}
 		f.pulls.Add(1)
 		return pull.Result{Samples: 1}, nil

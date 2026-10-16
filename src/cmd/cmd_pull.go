@@ -23,13 +23,14 @@ import (
 // stderr. The host is stored under its --alias, or under host:port when
 // only --host is given, so two servers on one address stay apart.
 func CmdPull(ctx context.Context, c *cli.Command) error {
-	path := c.String("db")
-	if path == "" {
-		p, err := store.DefaultPath()
-		if err != nil {
-			return err
+	path, err := store.DefaultPath()
+	if err != nil {
+		return err
+	}
+	if db := c.String("db"); db != "" {
+		if path, err = absPath(db); err != nil {
+			return fmt.Errorf("--db: %w", err)
 		}
-		path = p
 	}
 
 	client, err := connect(c, false)

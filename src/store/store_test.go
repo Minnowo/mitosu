@@ -261,7 +261,7 @@ func TestConcurrentIngest(t *testing.T) {
 // kinds returns "from-to" of the last event of each kind.
 func kinds(t *testing.T, db *DB) map[string]string {
 	t.Helper()
-	events, err := db.Events("web", math.MinInt64, math.MaxInt64)
+	events, err := db.Events("web", math.MinInt64, math.MaxInt64, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func kinds(t *testing.T, db *DB) map[string]string {
 // containerEvents lists container events as "seq name new|gone|changed".
 func containerEvents(t *testing.T, db *DB) []string {
 	t.Helper()
-	events, err := db.Events("web", math.MinInt64, math.MaxInt64)
+	events, err := db.Events("web", math.MinInt64, math.MaxInt64, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}
