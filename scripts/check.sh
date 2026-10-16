@@ -56,6 +56,17 @@ for f in $(git ls-files); do
 done
 [ -z "$bad" ] || fail "non-ASCII characters in:$bad"
 
+step "kanshi golden files"
+# testdata/kanshi-golden is a copy of kanshi's testdata/golden (protocol
+# 1.0). When the kanshi repository is next to this one, they must match.
+KANSHI_DIR="${KANSHI_DIR:-../kanshi}"
+if [ -d "$KANSHI_DIR/testdata/golden" ]; then
+    diff -r "$KANSHI_DIR/testdata/golden" testdata/kanshi-golden >/dev/null \
+        || fail "testdata/kanshi-golden differs from $KANSHI_DIR/testdata/golden; copy it again"
+else
+    step "kanshi golden files: $KANSHI_DIR not found, copy not compared"
+fi
+
 step "dependencies"
 approved="$(grep -v '^#' scripts/approved-deps.txt | grep -v '^$')"
 for dep in $(go list -m -f '{{if not .Indirect}}{{if not .Main}}{{.Path}}{{end}}{{end}}' all); do

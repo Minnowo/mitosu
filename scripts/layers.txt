@@ -3,7 +3,8 @@
 # import higher ones. scripts/check.sh fails on an import not listed here
 # and on a package with no line.
 .: src/cmd src/data src/logger
-src/cmd: src/data src/display src/shell src/ssh
+src/cmd: src/data src/display src/kanshi src/shell src/ssh
+src/kanshi:
 src/data: src/shell
 src/display:
 src/logger:

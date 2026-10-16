@@ -9,6 +9,24 @@ No special software is needed on the remote system, other than an SSH server and
 
 Currently only Linux systems can be monitored, other system support is planned.
 
+## Reading kanshi
+
+[kanshi](../kanshi) keeps a few days of samples on the server. With the
+same connection flags as `stat` (the login must be in group `kanshi`):
+
+```
+mitosu kanshi version --alias myserver
+mitosu kanshi export --alias myserver --since 0 --limit 100 > samples.jsonl
+```
+
+`export` checks the whole response against the kanshi protocol (1.x)
+and only then prints the sample lines; a response that fails any check
+prints nothing. A summary with the `next` value for `--since` goes to
+stderr. Output from the login's shell startup files before kanshi's
+first line is refused, so startup files must print to stderr or
+nothing. `version` gives up after 30 s and `export` after 10 minutes.
+Every failure exits with status 1.
+
 ## Connecting
 
 `--alias <name>` reads `~/.ssh/config` and `/etc/ssh/ssh_config` (or only

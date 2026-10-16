@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"io"
 	"net"
 	"path/filepath"
 	"sync"
@@ -27,10 +28,22 @@ type testSSHServer struct {
 	offered []gossh.PublicKey
 }
 
+// execHandler answers one exec request: it writes the command's output
+// to stdout and stderr and returns its exit status, or a signal name for
+// a command killed by a signal.
+type execHandler func(command string, stdout, stderr io.Writer) (uint32, string)
+
 // startSSHServer serves with hostKeys and accepts the authorized public
 // keys. Sessions are refused; a connection stays open until the client
 // closes it.
 func startSSHServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.PublicKey) *testSSHServer {
+	t.Helper()
+	return startExecServer(t, hostKeys, authorized, nil)
+}
+
+// startExecServer is startSSHServer with sessions that run exec requests
+// through exec (if not nil).
+func startExecServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.PublicKey, exec execHandler) *testSSHServer {
 	t.Helper()
 	srv := &testSSHServer{}
 	config := &gossh.ServerConfig{
@@ -68,7 +81,11 @@ func startSSHServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.Pu
 				go gossh.DiscardRequests(reqs)
 				go func() {
 					for ch := range chans {
-						ch.Reject(gossh.Prohibited, "test server")
+						if exec == nil || ch.ChannelType() != "session" {
+							ch.Reject(gossh.Prohibited, "test server")
+							continue
+						}
+						go serveSession(ch, exec)
 					}
 				}()
 				sc.Wait()
@@ -77,6 +94,41 @@ func startSSHServer(t *testing.T, hostKeys []gossh.Signer, authorized []gossh.Pu
 		}
 	}()
 	return srv
+}
+
+// serveSession answers the first exec request of a session channel with
+// exec and closes the channel.
+func serveSession(newCh gossh.NewChannel, exec execHandler) {
+	ch, reqs, err := newCh.Accept()
+	if err != nil {
+		return
+	}
+	defer ch.Close()
+	for req := range reqs {
+		if req.Type != "exec" {
+			req.Reply(false, nil)
+			continue
+		}
+		var payload struct{ Command string }
+		if err := gossh.Unmarshal(req.Payload, &payload); err != nil {
+			req.Reply(false, nil)
+			return
+		}
+		req.Reply(true, nil)
+		status, signal := exec(payload.Command, ch, ch.Stderr())
+		if signal != "" {
+			msg := struct {
+				Signal     string
+				CoreDumped bool
+				Error      string
+				Lang       string
+			}{Signal: signal}
+			ch.SendRequest("exit-signal", false, gossh.Marshal(msg))
+		} else {
+			ch.SendRequest("exit-status", false, gossh.Marshal(struct{ Status uint32 }{status}))
+		}
+		return
+	}
 }
 
 // record notes key once, in the order the client offered it.

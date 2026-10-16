@@ -8,7 +8,6 @@ import (
 	"mitosu/src/data"
 	cf "mitosu/src/display"
 	"mitosu/src/shell"
-	"mitosu/src/ssh"
 	"os"
 	"os/signal"
 	"sort"
@@ -29,40 +28,19 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 	poll := c.Value("poll").(uint)
 
 	jsonOutput := c.Value("json").(bool)
-	noPrompt := c.Value("no-prompt").(bool)
 	noPassSudo := c.Value("no-pass-sudo").(bool)
-
-	section, err := hostSection(c)
-	if err != nil {
-		return err
-	}
 
 	log.Debug().
 		Uint("poll", poll).
 		Bool("no-pass-sudo", noPassSudo).
 		Bool("with-root", withRoot).
 		Bool("json", jsonOutput).
-		Bool("no-prompt", noPrompt).
 		Bool("color", !noColor).
-		Str("name", section.Name).
-		Str("host", section.Hostname).
-		Int("port", section.Port).
-		Str("user", section.User).
-		Strs("keys", section.IdentityFiles).
-		Strs("known_hosts", section.KnownHostsFiles).
+		Bool("no-prompt", c.Bool("no-prompt")).
 		Msg("About to run stat")
 
-	client := ssh.SSHClient{
-		Config: section,
-		Passwords: ssh.SSHPasswords{
-			KeyPassword:  c.String("key-pass"),
-			UserPassword: c.String("user-pass"),
-			CanPrompt:    !noPrompt,
-		},
-		SudoRequiresPassword: !noPassSudo,
-	}
-
-	if err := client.Connect(); err != nil {
+	client, err := connect(c, !noPassSudo)
+	if err != nil {
 		return err
 	}
 	defer client.Close()

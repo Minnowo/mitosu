@@ -289,3 +289,47 @@ Each ends with check.sh green, an independent review, and a commit.
   handshake 30 s only without prompting (a prompt has no deadline); README
   lists the --user and default-key changes. Tests now include an
   in-process SSH server and ssh-agent (src/ssh/server_test.go).
+- 2026-10-17, M2 (kanshi reader): src/kanshi reads export and version
+  responses, plain or gzip: the first line must be a kanshi line
+  (anything printed earlier is refused, ErrNotKanshiOutput), lines are
+  capped at 1 MiB, a response without its end line is ErrTruncated, the
+  major version must be 1 (unknown fields and sections of newer minors
+  are ignored), seq must rise above --since, end.next must equal the
+  last seq, nothing may follow end, list lengths and strings are capped
+  as in the protocol. Server text shown to users goes through Printable
+  (no control characters). SSHClient.Exec streams a command's stdout to
+  a reader and keeps its exit status and 16 KiB of stderr. New commands
+  `mitosu kanshi version` and `mitosu kanshi export` (connection flags
+  shared with stat through connectionFlags in main.go). kanshi's golden
+  files are copied to testdata/kanshi-golden; check.sh compares the copy
+  with ../kanshi when present. Native Go fuzz target FuzzReadExport
+  (90 s, 1.66 M inputs, no failure). e2e: version, two export pages, and
+  a login outside group kanshi refused, against real kanshi 1.0.0.
+  For M3: an export with no samples but lost_through above --since keeps
+  next at --since, so the same loss is reported again on the next pull;
+  the store must record gaps idempotently.
+- 2026-10-17, M2 review (independent subagent), 11 findings, all fixed:
+  shell noise was reported as "kanshi did not answer (exit 101)" because
+  Exec cuts kanshi off once the reader refuses the first line (now the
+  noise hint wins whatever the status; e2e with a login whose shell
+  prints a greeting, checked to fail with the old order); Exec has a
+  deadline (version 30 s, export 10 min) and drops the connection if the
+  server does not close a session within 5 s of being asked; the reader
+  is told --limit and refuses more samples, and `more` unless exactly
+  --limit samples came; export prints nothing unless the whole response
+  passed (samples held in memory, capped at 256 MiB); every line must be
+  valid UTF-8 without raw C0, DEL or C1 characters, with lower-case,
+  unrepeated keys, no null and every required field (strict_json.go:
+  encoding/json alone is case-insensitive, lets the last duplicate win
+  and reads missing fields as zero); a sample needs at least one section;
+  an error line must be the only line; nothing may follow the end line,
+  nor the gzip stream; caps follow the protocol (container, project and
+  service names 128 and their pattern, image 256 printable ASCII, message
+  512, container id 64 hex, boot_id a UUID; cores 8192 is kanshi's own
+  cap, not the protocol's); ExecResult carries Signal and TimedOut; gzip
+  seeds for the fuzz target; tests for lost_through, limits, and each
+  strictness rule. Found for kanshi: it exits 101 (a Rust panic) when
+  its stdout is closed early; the protocol says 1. Fix pending in kanshi. Fuzzing after the fixes: two 60 s runs, about
+  3.2 M inputs with plain and gzip seeds, no failure; run with
+  -fuzzminimizetime 0, since minimizing large inputs otherwise stalls the
+  run at 0 execs/s for minutes (seen; not a hang in the reader).

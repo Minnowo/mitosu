@@ -6,11 +6,14 @@ package ssh
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"io"
 	"mitosu/src/shell"
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -120,6 +123,138 @@ func dial(addr string, config *gossh.ClientConfig, handshake time.Duration) (*go
 		return nil, err
 	}
 	return gossh.NewClient(c, chans, reqs), nil
+}
+
+// maxStderr caps the stderr kept from a remote command.
+const maxStderr = 16 * 1024
+
+// execGrace is how long Exec waits for the server to close a session it
+// was asked to close, before dropping the whole connection.
+const execGrace = 5 * time.Second
+
+// ExecResult is the outcome of a command run by Exec.
+type ExecResult struct {
+	// Status is the exit status, or -1 if the command ended without one:
+	// killed by a signal (Signal says which), cut off by Exec, or the
+	// connection was lost.
+	Status int
+	// Signal names the signal that ended the command, if one did.
+	Signal string
+	// TimedOut is true if Exec stopped the command at its deadline.
+	TimedOut bool
+	// Stderr holds the first 16 KiB of the command's stderr.
+	Stderr string
+	// ReadErr is the error returned by the read function.
+	ReadErr error
+}
+
+// Exec runs command in a new session on the connection, without a PTY or
+// stdin, and calls read with the command's stdout while it runs. When read
+// returns, the session is closed (a command still writing is cut off) and
+// waited for. If the whole run takes longer than timeout, the session is
+// closed, so read sees the end of stdout. A server that does not close a
+// session within 5 s of being asked has the whole connection dropped
+// (later calls on this client fail). The error is only for a session that
+// could not be started.
+func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Reader) error) (ExecResult, error) {
+	log.Debug().Str("command", command).Msg("Running command")
+	session, err := s.Client.NewSession()
+	if err != nil {
+		return ExecResult{Status: -1}, err
+	}
+
+	stderr := &cappedBuffer{max: maxStderr}
+	session.Stderr = stderr
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		closeSession(session)
+		return ExecResult{Status: -1}, err
+	}
+	if err := session.Start(command); err != nil {
+		closeSession(session)
+		return ExecResult{Status: -1}, err
+	}
+
+	done := make(chan struct{})
+	var timedOut atomic.Bool
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-time.After(timeout):
+		}
+		timedOut.Store(true)
+		closeSession(session)
+		select {
+		case <-done:
+		case <-time.After(execGrace):
+			s.Client.Close()
+		}
+	}()
+
+	readErr := read(stdout)
+	// Stop a command that is still sending (read gave up early); after a
+	// complete read this only ends an idle session.
+	closeSession(session)
+	waited := make(chan error, 1)
+	go func() {
+		waited <- session.Wait()
+	}()
+	var waitErr error
+	select {
+	case waitErr = <-waited:
+	case <-time.After(execGrace):
+		s.Client.Close()
+		waitErr = <-waited
+	}
+	close(done)
+
+	res := ExecResult{Stderr: stderr.String(), ReadErr: readErr, TimedOut: timedOut.Load()}
+	var exitErr *gossh.ExitError
+	switch {
+	case errors.As(waitErr, &exitErr):
+		res.Status = exitErr.ExitStatus()
+		if exitErr.Signal() != "" {
+			res.Status = -1
+			res.Signal = exitErr.Signal()
+		}
+	case waitErr != nil:
+		// *gossh.ExitMissingError, or the connection went away.
+		res.Status = -1
+	}
+	return res, nil
+}
+
+// closeSession closes a session, logging a failure other than "already
+// closed".
+func closeSession(session *gossh.Session) {
+	if err := session.Close(); err != nil && !errors.Is(err, io.EOF) {
+		log.Debug().Err(err).Msg("Closing session")
+	}
+}
+
+// cappedBuffer keeps the first max bytes written to it and drops the rest.
+type cappedBuffer struct {
+	max int
+	buf bytes.Buffer
+}
+
+// Write keeps what fits under max and reports all of p as written, so the
+// writer never sees an error.
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if room := c.max - c.buf.Len(); room > 0 {
+		if len(p) > room {
+			c.buf.Write(p[:room])
+		} else {
+			c.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+// String returns the bytes kept.
+func (c *cappedBuffer) String() string {
+	return c.buf.String()
 }
 
 func (s *SSHClient) Close() error {

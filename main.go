@@ -31,14 +31,39 @@ func main() {
 		Before: logger.CliInit,
 		Commands: []*cli.Command{
 			{
+				Name:        "kanshi",
+				Usage:       "Read the history kanshi keeps on a server",
+				Description: "Run kanshi requests over SSH and check the responses (protocol 1.x).",
+				Commands: []*cli.Command{
+					{
+						Name:   "version",
+						Usage:  "Show the server's kanshi and protocol versions",
+						Flags:  connectionFlags(),
+						Action: cmd.CmdKanshiVersion,
+					},
+					{
+						Name:  "export",
+						Usage: "Print the checked samples after --since (JSON lines) and a summary on stderr",
+						Flags: append(connectionFlags(),
+							&cli.Uint64Flag{
+								Name:  "since",
+								Usage: "Return samples with a sequence number above this.",
+								Value: 0,
+							},
+							&cli.Uint64Flag{
+								Name:  "limit",
+								Usage: "Return at most this many samples (up to 1000000; 0 means no limit).",
+								Value: 100,
+							},
+						),
+						Action: cmd.CmdKanshiExport,
+					},
+				},
+			},
+			{
 				Name:        "stat",
 				Description: "See stats of a server",
-				Flags: []cli.Flag{
-					&cli.BoolFlag{
-						Name:     "no-prompt",
-						Usage:    "Never prompt for passwords, all passwords must be supplied via environment variables or command flags.",
-						Required: false,
-					},
+				Flags: append(connectionFlags(),
 					&cli.BoolFlag{
 						Name:     "no-pass-sudo",
 						Usage:    "Should be set if the remote user doesn't need a password for sudo.",
@@ -69,61 +94,7 @@ func main() {
 						Usage:    "Elevate the remote shell using sudo.",
 						Required: false,
 					},
-					&cli.StringFlag{
-						Name:     "config",
-						Aliases:  []string{"c"},
-						Usage:    "The SSH config file path.",
-						Value:    "~/.ssh/config",
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "alias",
-						Aliases:  []string{"a"},
-						Usage:    "The SSH config host alias.",
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "host",
-						Aliases:  []string{"H"},
-						Usage:    "The remote host (IP address or domain).",
-						Required: false,
-					},
-					&cli.IntFlag{
-						Name:     "port",
-						Aliases:  []string{"p"},
-						Usage:    "The remote SSH port. Default: the ssh config's Port, else 22.",
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "user",
-						Aliases:  []string{"u"},
-						Usage:    "The user to SSH as. Default: the ssh config's User, else the local user.",
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "user-pass",
-						Usage:    "The remote user password.",
-						Sources:  cli.EnvVars("MITOSU_USER_PASSWORD"),
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "key",
-						Aliases:  []string{"i"},
-						Usage:    "The SSH private key file path.",
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "known-hosts",
-						Usage:    "The known_hosts file to check the server's host key against. Default: the ssh config's, else ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts. Unknown or changed keys are refused.",
-						Required: false,
-					},
-					&cli.StringFlag{
-						Name:     "key-pass",
-						Usage:    "The SSH private key password.",
-						Sources:  cli.EnvVars("MITOSU_KEY_PASSWORD"),
-						Required: false,
-					},
-				},
+				),
 				Commands: []*cli.Command{
 					{
 						Name:        "all",
@@ -164,4 +135,70 @@ func main() {
 		log.Fatal().Err(err).Msg("")
 	}
 
+}
+
+// connectionFlags are the flags that say which server to reach and how to
+// log in, shared by every command that connects.
+func connectionFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.BoolFlag{
+			Name:     "no-prompt",
+			Usage:    "Never prompt for passwords, all passwords must be supplied via environment variables or command flags.",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "config",
+			Aliases:  []string{"c"},
+			Usage:    "The SSH config file path.",
+			Value:    "~/.ssh/config",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "alias",
+			Aliases:  []string{"a"},
+			Usage:    "The SSH config host alias.",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "host",
+			Aliases:  []string{"H"},
+			Usage:    "The remote host (IP address or domain).",
+			Required: false,
+		},
+		&cli.IntFlag{
+			Name:     "port",
+			Aliases:  []string{"p"},
+			Usage:    "The remote SSH port. Default: the ssh config's Port, else 22.",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "user",
+			Aliases:  []string{"u"},
+			Usage:    "The user to SSH as. Default: the ssh config's User, else the local user.",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "user-pass",
+			Usage:    "The remote user password.",
+			Sources:  cli.EnvVars("MITOSU_USER_PASSWORD"),
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "key",
+			Aliases:  []string{"i"},
+			Usage:    "The SSH private key file path.",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "known-hosts",
+			Usage:    "The known_hosts file to check the server's host key against. Default: the ssh config's, else ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts. Unknown or changed keys are refused.",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:     "key-pass",
+			Usage:    "The SSH private key password.",
+			Sources:  cli.EnvVars("MITOSU_KEY_PASSWORD"),
+			Required: false,
+		},
+	}
 }

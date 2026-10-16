@@ -8,9 +8,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -104,6 +106,82 @@ func TestE2EOnlyRSAKeyKnown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat with only the RSA key known: %v\n%s", err, stderr)
 	}
+}
+
+func TestE2EKanshiVersion(t *testing.T) {
+	srv := testServer(t)
+	out, stderr, err := runMitosu(t, append([]string{"kanshi", "version"}, srv.flags()...)...)
+	if err != nil {
+		t.Fatalf("kanshi version: %v\n%s", err, stderr)
+	}
+	if out != "kanshi 1.0.0, protocol 1.0\n" {
+		t.Fatalf("output %q", out)
+	}
+}
+
+func TestE2EKanshiExportPages(t *testing.T) {
+	srv := testServer(t)
+	next := uint64(0)
+	var lastSeq uint64
+	for page := 0; page < 2; page++ {
+		args := append([]string{"kanshi", "export", "--since", strconv.FormatUint(next, 10), "--limit", "3"}, srv.flags()...)
+		out, stderr, err := runMitosu(t, args...)
+		if err != nil {
+			t.Fatalf("kanshi export: %v\n%s", err, stderr)
+		}
+		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+		if len(lines) != 3 {
+			t.Fatalf("page %d: %d lines, want 3", page, len(lines))
+		}
+		for _, line := range lines {
+			var s struct {
+				Type string `json:"type"`
+				Seq  uint64 `json:"seq"`
+			}
+			if err := json.Unmarshal([]byte(line), &s); err != nil || s.Type != "sample" || s.Seq <= lastSeq {
+				t.Fatalf("page %d: bad line (err %v): %.120s", page, err, line)
+			}
+			lastSeq = s.Seq
+		}
+		want := fmt.Sprintf("3 samples after %d, next %d, more true", next, lastSeq)
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("summary %q does not contain %q", stderr, want)
+		}
+		next = lastSeq
+	}
+}
+
+func TestE2EKanshiOutsiderIsRefused(t *testing.T) {
+	srv := testServer(t)
+	outsider := os.Getenv("MITOSU_E2E_OUTSIDER_KEY")
+	if outsider == "" {
+		t.Skip("MITOSU_E2E_OUTSIDER_KEY not set; run scripts/e2e.sh")
+	}
+	_, stderr, err := runMitosu(t, "kanshi", "export", "--no-prompt",
+		"--host", srv.host, "--port", srv.port, "--user", "outsider",
+		"--key", outsider, "--known-hosts", srv.knownHosts)
+	if err == nil || !strings.Contains(stderr, "kanshi error") {
+		t.Fatalf("a login outside group kanshi read the store: err %v\n%s", err, stderr)
+	}
+}
+
+func TestE2EKanshiShellNoiseIsExplained(t *testing.T) {
+	srv := testServer(t)
+	srv.user = "noisy"
+	for _, sub := range []string{"export", "version"} {
+		out, stderr, err := runMitosu(t, append([]string{"kanshi", sub}, srv.flags()...)...)
+		if err == nil || !strings.Contains(stderr, "shell startup files") {
+			t.Fatalf("%s: err %v\n%s", sub, err, stderr)
+		}
+		if out != "" {
+			t.Fatalf("%s: printed %q for a refused response", sub, out)
+		}
+	}
+}
+
+// flags returns the connection flags for the test server as user dev.
+func (s e2eServer) flags() []string {
+	return []string{"--no-prompt", "--host", s.host, "--port", s.port, "--user", s.user, "--key", s.key, "--known-hosts", s.knownHosts}
 }
 
 func testServer(t *testing.T) e2eServer {
