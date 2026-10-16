@@ -61,6 +61,17 @@ func main() {
 				},
 			},
 			{
+				Name:  "serve",
+				Usage: "Pull every configured host on a timer (server mode)",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "config",
+						Usage: "The config file. Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf.",
+					},
+				},
+				Action: cmd.CmdServe,
+			},
+			{
 				Name:  "check-config",
 				Usage: "Check mitosu.conf and print the settings serve would use",
 				Flags: []cli.Flag{

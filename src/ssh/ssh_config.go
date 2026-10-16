@@ -368,6 +368,20 @@ func (r *resolver) tokens(s *Section) map[byte]string {
 	return t
 }
 
+// DefaultConfigFiles returns ~/.ssh/config and the system config, with
+// their Include bases, in the order ssh reads them.
+func DefaultConfigFiles() ([]ConfigFile, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	userBase := filepath.Join(home, ".ssh")
+	return []ConfigFile{
+		{Path: filepath.Join(userBase, "config"), IncludeBase: userBase},
+		{Path: SystemConfigPath, IncludeBase: filepath.Dir(SystemConfigPath)},
+	}, nil
+}
+
 // KnownHostsAddress returns the host:port looked up in known_hosts: the
 // HostKeyAlias without a port (OpenSSH ignores the port for an alias), or
 // Hostname and Port.

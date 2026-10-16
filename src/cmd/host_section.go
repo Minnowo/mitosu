@@ -6,8 +6,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/rs/zerolog/log"
@@ -86,21 +84,16 @@ func resolveHost(f hostFlags) (ssh.Section, []string, error) {
 	if f.host != "" {
 		overrides["hostname"] = f.host
 	}
-	home, err := os.UserHomeDir()
+	files, err := ssh.DefaultConfigFiles()
 	if err != nil {
 		return ssh.Section{}, nil, err
-	}
-	userBase := filepath.Join(home, ".ssh")
-	files := []ssh.ConfigFile{
-		{Path: filepath.Join(userBase, "config"), IncludeBase: userBase},
-		{Path: ssh.SystemConfigPath, IncludeBase: filepath.Dir(ssh.SystemConfigPath)},
 	}
 	if f.configSet {
 		path, err := ssh.ExpandPath(f.config)
 		if err != nil {
 			return ssh.Section{}, nil, fmt.Errorf("--config: %w", err)
 		}
-		files = []ssh.ConfigFile{{Path: path, IncludeBase: userBase}}
+		files = []ssh.ConfigFile{{Path: path, IncludeBase: files[0].IncludeBase}}
 	}
 	return ssh.Resolve(files, f.alias, overrides)
 }

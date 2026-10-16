@@ -235,6 +235,10 @@ Run scripts/e2e.sh before committing changes to src/ssh, src/cmd or
 anything that talks to a server; it needs Docker, so check.sh does not
 run it.
 
+Commit only after reading check.sh's own exit status: never chain a
+commit after `scripts/check.sh | tail` (the pipe reports tail's status;
+this let a failing commit through once).
+
 Go is at ~/.local/go/bin on the dev machine; check.sh adds it to PATH.
 End-to-end tests (`e2e_test.go`, `TestE2E*`) use kanshi's test server
 (`../kanshi/testserver/run.sh`, 127.0.0.1:2222); they skip without the

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -14,7 +15,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -202,6 +206,72 @@ func TestE2EPullTwice(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("database file: %v %v", info, err)
 	}
+}
+
+func TestE2EServePullsAndStops(t *testing.T) {
+	srv := testServer(t)
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sshConfig := "Host testbox\n  HostName " + srv.host + "\n  Port " + srv.port + "\n  User " + srv.user +
+		"\n  IdentityFile " + srv.key + "\n  UserKnownHostsFile " + srv.knownHosts + "\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(sshConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(home, "history.db")
+	conf := filepath.Join(home, "mitosu.conf")
+	if err := os.WriteFile(conf, []byte("host = testbox\npull_interval = 30s\ndb = "+db+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(binary, "serve", "--config", conf)
+	cmd.Env = append(os.Environ(), "HOME="+home, "SSH_AUTH_SOCK=", "XDG_CONFIG_HOME=", "XDG_DATA_HOME=")
+	var logs syncBuffer
+	cmd.Stderr = &logs
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for !strings.Contains(logs.String(), "Pulled") {
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			t.Fatalf("no pull within 60 s:\n%s", logs.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("serve did not stop cleanly: %v\n%s", err, logs.String())
+	}
+	if !strings.Contains(logs.String(), "Stopped") {
+		t.Fatalf("no clean stop logged:\n%s", logs.String())
+	}
+	if info, err := os.Stat(db); err != nil || info.Size() == 0 {
+		t.Fatalf("database not written: %v", err)
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for a writing process and a reading
+// test.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // flags returns the connection flags for the test server as user dev.

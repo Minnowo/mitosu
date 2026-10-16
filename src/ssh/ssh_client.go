@@ -125,6 +125,29 @@ func dial(addr string, config *gossh.ClientConfig, handshake time.Duration) (*go
 	return gossh.NewClient(c, chans, reqs), nil
 }
 
+// Alive reports whether the connection still answers, by sending an
+// OpenSSH keepalive request and waiting at most timeout for the reply.
+// A dead or silent connection is closed.
+func (s *SSHClient) Alive(timeout time.Duration) bool {
+	if s.Client == nil {
+		return false
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := s.Client.SendRequest("keepalive@openssh.com", true, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			return true
+		}
+	case <-time.After(timeout):
+	}
+	s.Client.Close()
+	return false
+}
+
 // maxStderr caps the stderr kept from a remote command.
 const maxStderr = 16 * 1024
 

@@ -34,6 +34,10 @@ const (
 	// EventContainer: a container appeared, changed state, health, image,
 	// ID, restart count or exit, or disappeared.
 	EventContainer = "container"
+	// EventPullFailed: pulling the host started failing (detail: why).
+	EventPullFailed = "pull_failed"
+	// EventPullOK: pulling the host works again after failures.
+	EventPullOK = "pull_ok"
 )
 
 // ErrStoreChanged is returned by Ingest when the server's store ID is not
