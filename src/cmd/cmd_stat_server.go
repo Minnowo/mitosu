@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -174,12 +175,8 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 			return err
 		}
 
-		i := 0
-		for _, stat := range systemStats {
-
-			n := stat.CmdCount(sh.GetType())
-			stat.ParseCmdOutput(sh.GetType(), results[i:i+n])
-			i += n
+		if err := parseResults(sh.GetType(), systemStats, results); err != nil {
+			return err
 		}
 
 		PrintStats(jsonOutput, &output, systemStats)
@@ -301,7 +298,7 @@ func PrintStat(t *cf.VirtualTerm, stat data.SystemStat) {
 		fsTypeLens := map[data.FSType]int{}
 		for _, fs := range v.FSInfos {
 
-			if fs.Filesystem[0] != '/' {
+			if !strings.HasPrefix(fs.Filesystem, "/") {
 				continue
 			}
 			count, ok := fsTypeLens[fs.Type]
@@ -324,7 +321,7 @@ func PrintStat(t *cf.VirtualTerm, stat data.SystemStat) {
 			}
 
 			t.StartLine()
-			if fs.Filesystem[0] == '/' {
+			if strings.HasPrefix(fs.Filesystem, "/") {
 				// we want file paths to be right aligned
 				t.Print("%s", cf.Bold(cf.LPad(cf.RPad(fs.Filesystem, fsTypeLens[fs.Type]), pad)))
 			} else {
@@ -390,11 +387,20 @@ func PrintStat(t *cf.VirtualTerm, stat data.SystemStat) {
 				cf.Bold(cf.FmtByteU64(ct.BlockIn, 5)),
 				cf.Bold(cf.FmtByteU64(ct.BlockOut, 5)),
 				cf.Bold(cf.LPad(strconv.FormatUint(ct.PIDs, 10), 4)),
-				cf.Bold(ct.ID[0:len("xxxxxxxxxxxx")]),
+				cf.Bold(shortID(ct.ID)),
 			)
 		}
 
 		t.Line("")
 
 	}
+}
+
+// shortID returns the first 12 characters of a container ID, as docker
+// prints them, or the whole ID if it is shorter.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }

@@ -124,7 +124,7 @@ func (f *ProcInfoSystemStat) ParseCmdOutput(sh shell.ShellType, outs []string) {
 	err = f.getMemInfo(outs[3])
 	log.Debug().Err(err).Msg("Parsing memory info")
 
-	if len(outs) < 4 {
+	if len(outs) < 5 {
 		log.Debug().Msg("Could only parse 4 of 5 proc stats")
 		return
 	}
@@ -273,8 +273,11 @@ func (f *ProcInfoSystemStat) getCPU(lines string) error {
 	}
 
 	preCPU := f.CPURaw
+	f.CPU = CPUInfo{}
 
-	if preCPU.Total != 0 { // having no pre raw cpu data
+	// No rate on the first sample, when no CPU time passed, or when a
+	// counter went down (reboot): a missing value is better than a wrong one.
+	if preCPU.Total != 0 && nowCPU.Total > preCPU.Total && !cpuCounterWentDown(preCPU, nowCPU) {
 		total = float32(nowCPU.Total - preCPU.Total)
 		f.CPU.User = float32(nowCPU.User-preCPU.User) / total * 100
 		f.CPU.Nice = float32(nowCPU.Nice-preCPU.Nice) / total * 100
@@ -283,6 +286,7 @@ func (f *ProcInfoSystemStat) getCPU(lines string) error {
 		f.CPU.Iowait = float32(nowCPU.Iowait-preCPU.Iowait) / total * 100
 		f.CPU.Irq = float32(nowCPU.Irq-preCPU.Irq) / total * 100
 		f.CPU.SoftIrq = float32(nowCPU.SoftIrq-preCPU.SoftIrq) / total * 100
+		f.CPU.Steal = float32(nowCPU.Steal-preCPU.Steal) / total * 100
 		f.CPU.Guest = float32(nowCPU.Guest-preCPU.Guest) / total * 100
 		f.CPU.Total = nowCPU.Total
 	}
@@ -290,4 +294,12 @@ func (f *ProcInfoSystemStat) getCPU(lines string) error {
 	f.CPURaw = nowCPU
 
 	return nil
+}
+
+// cpuCounterWentDown reports whether any counter in now is below its value
+// in pre, which happens when the host rebooted between the two samples.
+func cpuCounterWentDown(pre, now CPURaw) bool {
+	return now.User < pre.User || now.Nice < pre.Nice || now.System < pre.System ||
+		now.Idle < pre.Idle || now.Iowait < pre.Iowait || now.Irq < pre.Irq ||
+		now.SoftIrq < pre.SoftIrq || now.Steal < pre.Steal || now.Guest < pre.Guest
 }

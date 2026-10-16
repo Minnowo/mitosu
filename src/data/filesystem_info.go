@@ -119,6 +119,13 @@ func (f *FSSystemStat) ParseCmdOutput(sh shell.ShellType, outs []string) {
 			continue
 		}
 
+		// A line before the header or shorter than it was cut off or is
+		// not df output.
+		if headerEndIndex[4] == 0 || len(line) < headerEndIndex[4] {
+			log.Debug().Str("line", line).Msg("Parsing FS, line does not fit the header")
+			continue
+		}
+
 		fs := FSInfo{}
 
 		chunk1 := line[:headerEndIndex[1]]
