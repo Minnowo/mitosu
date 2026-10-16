@@ -61,6 +61,17 @@ func main() {
 				},
 			},
 			{
+				Name:  "check-config",
+				Usage: "Check mitosu.conf and print the settings serve would use",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "config",
+						Usage: "The config file. Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf.",
+					},
+				},
+				Action: cmd.CmdCheckConfig,
+			},
+			{
 				Name:  "pull",
 				Usage: "Store a server's new kanshi samples in the local history",
 				Flags: append(connectionFlags(),
