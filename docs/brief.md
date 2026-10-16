@@ -448,3 +448,61 @@ Each ends with check.sh green, an independent review, and a commit.
   request: --db on serve, passwd and check-config (as on pull), which
   overrides the config's db, so `--config FILE --db FILE` keeps every
   file mitosu writes where the user says.
+- 2026-10-17, M5 (web UI). npm packages, exact versions, each at least
+  two weeks old (Preact 11.0.1 and Vite 8.3.4 were 8 days old and Preact
+  11 a new major, so the newest Preact 10 and an older Vite): preact
+  10.29.8, uplot 1.6.32 (both MIT, the only code in the page); build
+  only: vite 8.3.2, @preact/preset-vite 2.10.6, tailwindcss and
+  @tailwindcss/vite 4.3.3 (MIT), typescript 7.0.2 (Apache-2.0). The 102
+  installed packages are MIT, ISC, BSD or Apache, plus MPL-2.0
+  (lightningcss, used by Tailwind) and CC-BY-4.0 (caniuse-lite data),
+  both build-time only. npm runs in node:26-trixie-slim pinned by digest
+  (scripts/web.sh); the ponkotsu theme was generated once and committed
+  (web/README.md). web/dist is not committed: check.sh builds it first
+  and so needs Docker. The binary embeds it (web/embed.go) and serve
+  answers / with it (index.html no-cache, hashed assets cached a year);
+  one fallback route answers unknown /api/ paths with JSON 404 and other
+  methods than GET/HEAD with 405 (registering "GET /" next to "/api/"
+  crashed at start, found by running it; now tested with a UI present).
+  New API: /api/latest, /api/containers; /api/hosts gives the pull
+  interval and the problems of each host. Problems are derived in Go
+  (src/problems, every threshold tested): disk free under 10 % (5 %
+  critical), inodes over 90 % (95 %), memory available under 10 % (5 %),
+  swap over 80 %, CPU busy over 90 % (95 %) averaged over 15 min, load5
+  over twice the cores, containers dead or unhealthy (critical),
+  restarting, exited non-zero or OOM-killed; no new sample for one pull
+  interval plus 3 min; pulls failing; problems kanshi reports. Pages:
+  login; overview (a card per host: status, CPU, memory, fullest
+  filesystem, load, containers running, problems); host (range 1h to
+  1y, charts for CPU, memory, load, each core, each filesystem, disk I/O
+  and busy, network received and sent, container CPU and memory; gaps
+  over 2.5 steps are drawn as gaps; container table; newest 200
+  events). Follows the system's light or dark setting. Checked with
+  headless Firefox screenshots (WebDriver BiDi, light, dark, 390 px
+  wide, login) against kanshi's test server.
+- 2026-10-17, M5 review (independent subagent), 15 findings, all fixed;
+  each Go-side fix's test checked to fail with the fix undone, the UI
+  ones checked in the browser. The host page re-requested in a loop for
+  a host without samples (827 event requests in 13 s; now one per
+  minute: requests depend on a clock that moves once a refresh). Charts
+  with mixed steps lost their lines: aligning moved to Go (/api/chart,
+  store.Chart: all series merged into the coarsest step, gaps of over
+  2.5 steps marked, series without values left out, at most 64 series),
+  so web/src/aligned.ts is gone and the logic is tested. Problem
+  windows are measured from the newest sample, not from now; "no new
+  samples" allows the pull interval plus 3 min or 3 of kanshi's own
+  sample intervals (store.SampleInterval), whichever is longer; the CPU
+  average is exact over its 15 minutes (store.Average); without a raw
+  tier, latest values come from the finest rollup; kanshi's problems are
+  read from the newest stored sample; exit codes 137 and 143 (docker
+  stop) are not failures. Charts end now, so stale data shows as an empty
+  stretch; the series list reloads each minute; every load error is
+  shown; an older response can no longer replace a newer one; logout
+  failures are shown; charts shrink with the window and redraw when the
+  theme changes; /assets/ no longer lists the directory. Builds: make
+  test/release build the UI first, goreleaser checks web/dist exists;
+  web.sh installs by content hash with install scripts off and builds
+  without the network; scripts/check-npm.sh enforces
+  scripts/approved-npm.txt and registry-only locked packages. Not done
+  by a test: the UI's request loop and ordering (no JS test runner is
+  approved), checked by counting requests in headless Firefox.

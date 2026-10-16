@@ -47,8 +47,14 @@ keeps what it stored and the next one continues from there.
 ## Server mode
 
 `mitosu serve` pulls every server listed in `~/.config/mitosu/mitosu.conf`
-on a timer and serves a JSON API (the web UI follows) on 127.0.0.1:7878,
-behind a login (`mitosu passwd`). See [docs/running.md](docs/running.md)
+on a timer and serves a web UI on http://127.0.0.1:7878, behind a login
+(`mitosu passwd`): an overview of every server with what needs attention
+(disk or memory low, CPU or load high, containers unhealthy, restarting
+or failed, no new samples, pulls failing), and per server charts of CPU,
+memory, load, disks, network and containers from the last hour to the
+last year, its containers and its events. Charts end at the current
+time, so a server that stopped reporting shows an empty stretch; gaps in
+its history are drawn as gaps. See [docs/running.md](docs/running.md)
 and the commented [deploy/mitosu.conf](deploy/mitosu.conf);
 `mitosu check-config` shows the settings in effect.
 
@@ -61,6 +67,15 @@ mitosu serve --config /srv/mitosu/mitosu.conf --db /srv/mitosu/history.db
 
 `--db` works on `pull`, `serve`, `passwd` and `check-config` and wins
 over the config's `db` line.
+
+## Building
+
+The web UI is embedded in the binary; build it first (npm runs inside
+Docker, see web/README.md):
+
+```
+make build      # scripts/web.sh, then go build
+```
 
 ## Connecting
 

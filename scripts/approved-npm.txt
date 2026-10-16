@@ -1,0 +1,10 @@
+# npm packages approved in docs/brief.md (M5 entry): name@version, one
+# per line, for web/package.json's dependencies and devDependencies.
+# scripts/check-npm.sh fails on any other.
+preact@10.29.8
+uplot@1.6.32
+@preact/preset-vite@2.10.6
+@tailwindcss/vite@4.3.3
+tailwindcss@4.3.3
+typescript@7.0.2
+vite@8.3.2

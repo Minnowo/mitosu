@@ -1,0 +1,19 @@
+{
+  "name": "mitosu-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "preact": "10.29.8",
+    "uplot": "1.6.32"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "2.10.6",
+    "@tailwindcss/vite": "4.3.3",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.2"
+  }
+}

@@ -1,6 +1,6 @@
 // The HTTP server of `mitosu serve`: routes, login gate, timeouts, opt-in
 // TLS and shutdown (docs/brief.md section 3, "Web server", "Login",
-// "TLS"). The JSON API is under /api/; the web UI comes in milestone 5.
+// "TLS"). The JSON API is under /api/; the built web UI is served from /.
 
 package web
 
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -35,6 +36,11 @@ type Options struct {
 	TLSCert, TLSKey string
 	// Tiers are the configured storage tiers (for choosing what to read).
 	Tiers []store.Tier
+	// PullInterval is the configured time between pulls.
+	PullInterval time.Duration
+	// UI holds the built web UI (index.html at its root); nil serves
+	// none.
+	UI fs.FS
 }
 
 // Server answers the web UI's requests.
@@ -66,9 +72,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/points", s.loggedIn(s.handlePoints))
 	mux.Handle("GET /api/events", s.loggedIn(s.handleEvents))
 	mux.Handle("POST /api/pull", s.loggedIn(s.handlePull))
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotFound, "no such API")
-	})
+	mux.Handle("GET /api/latest", s.loggedIn(s.handleLatest))
+	mux.Handle("GET /api/chart", s.loggedIn(s.handleChart))
+	mux.Handle("GET /api/containers", s.loggedIn(s.handleContainers))
+	mux.Handle("/", fallback(s.opts.UI))
+
 	allowed := map[string]bool{}
 	if host, _, err := net.SplitHostPort(s.opts.Listen); err == nil && host != "" {
 		allowed[strings.ToLower(host)] = true

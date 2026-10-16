@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The single project check: format, vet, tests, static build and the
-# repository rules from CLAUDE.md that tools can enforce. Must pass before
+# The single project check: web UI build, format, vet, tests, static build
+# and the repository rules from CLAUDE.md that tools can enforce. Needs
+# Docker (npm runs in a pinned Node image). Must pass before
 # every commit. Run from anywhere: scripts/check.sh
 
 set -euo pipefail
@@ -19,6 +20,19 @@ fail() {
 step() {
     echo "check: $*"
 }
+
+step "web UI (type check and build; npm runs in Docker, see scripts/web.sh)"
+# The Go build embeds web/dist, so it comes first.
+web_log="$(mktemp)"
+scripts/web.sh >"$web_log" 2>&1 || {
+    cat "$web_log" >&2
+    rm -f "$web_log"
+    fail "web UI build failed"
+}
+rm -f "$web_log"
+
+step "npm packages"
+scripts/check-npm.sh
 
 step "format"
 unformatted="$(gofmt -l -s .)"

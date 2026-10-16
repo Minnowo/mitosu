@@ -1,5 +1,11 @@
 project_name: mitosu
 
+# The binary embeds web/dist; build it first with `make web` (npm runs in
+# Docker, which this release container does not have).
+before:
+  hooks:
+    - test -f web/dist/index.html
+
 builds:
   - id: linux-amd64
     main: ./

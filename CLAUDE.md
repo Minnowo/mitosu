@@ -219,15 +219,17 @@ src/<package>/     one directory per package; allowed imports between
 docs/brief.md      approved brief (source of truth)
 docs/reference/    downloaded specs
 scripts/check.sh   the one check; approved-deps.txt, layers.txt feed it
-web/               the web UI (from milestone 5; npm runs in Docker only)
+web/               the web UI (Preact, TypeScript; web/README.md); npm runs
+                   in Docker only, through scripts/web.sh
 ```
 
 ### Commands
 
 ```
-check:  scripts/check.sh   (gofmt, go vet, tests with -race, static build, rules)
-build:  CGO_ENABLED=0 go build -trimpath .
-test:   go test ./...
+check:  scripts/check.sh   (web UI build, gofmt, go vet, tests with -race, static build, rules)
+web:    scripts/web.sh     (npm in a pinned Node image; the Go build embeds web/dist)
+build:  make build         (scripts/web.sh, then CGO_ENABLED=0 go build -trimpath)
+test:   go test ./...      (after scripts/web.sh: the build embeds web/dist)
 e2e:    scripts/e2e.sh     (TestE2E* over real SSH against kanshi's test server)
 ```
 
@@ -240,6 +242,9 @@ commit after `scripts/check.sh | tail` (the pipe reports tail's status;
 this let a failing commit through once).
 
 Go is at ~/.local/go/bin on the dev machine; check.sh adds it to PATH.
+check.sh needs Docker (the web UI build). For UI changes, look at the
+pages in a browser (headless Firefox screenshots work) before calling
+them done.
 End-to-end tests (`e2e_test.go`, `TestE2E*`) use kanshi's test server
 (`../kanshi/testserver/run.sh`, 127.0.0.1:2222); they skip without the
 variables scripts/e2e.sh sets, and that script fails on any skip.

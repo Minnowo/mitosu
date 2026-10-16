@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"mitosu/src/auth"
@@ -100,6 +101,8 @@ func TestLogin(t *testing.T) {
 	}
 	for _, ep := range []struct{ method, path string }{
 		{"GET", "/api/hosts"}, {"GET", "/api/series?host=web"},
+		{"GET", "/api/latest?host=web"}, {"GET", "/api/containers?host=web"},
+		{"GET", "/api/chart?host=web&s=host||mem_used_bytes&from=0&to=60000"},
 		{"GET", "/api/points?host=web&kind=host&metric=mem_used_bytes&from=0&to=60000"},
 		{"GET", "/api/events?host=web&from=0&to=60000"}, {"POST", "/api/pull?host=web"},
 	} {
@@ -201,6 +204,40 @@ func TestBadRequests(t *testing.T) {
 	}
 }
 
+func TestUI(t *testing.T) {
+	s := newTestServer(t, true)
+	s.opts.UI = fstest.MapFS{
+		"index.html":         {Data: []byte("<!doctype html><title>mitosu</title>")},
+		"assets/index-a1.js": {Data: []byte("console.log(1)")},
+	}
+	h := s.Handler()
+	get := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "127.0.0.1:7878"
+		return serve(h, r)
+	}
+	if w := get("/"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "<title>mitosu") || w.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("/: %d %q %q", w.Code, w.Header().Get("Cache-Control"), w.Body.String())
+	}
+	if w := get("/assets/index-a1.js"); w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("asset: %d %q", w.Code, w.Header().Get("Cache-Control"))
+	}
+	if w := get("/nope.js"); w.Code != http.StatusNotFound {
+		t.Fatalf("missing file: %d", w.Code)
+	}
+	if w := get("/assets/"); w.Code != http.StatusNotFound || strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("directory listing: %d %q", w.Code, w.Header().Get("Cache-Control"))
+	}
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Host = "127.0.0.1:7878"
+	if w := serve(h, r); w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /: %d", w.Code)
+	}
+	if w := serve(h, apiRequest("GET", "/api/nope", "")); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "no such API") {
+		t.Fatalf("unknown API: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestEndpoints(t *testing.T) {
 	s := newTestServer(t, false)
 	h := s.Handler()
@@ -227,6 +264,29 @@ func TestEndpoints(t *testing.T) {
 	}
 	if got := serve(h, apiRequest("POST", "/api/pull?host=web", "")).Code; got != http.StatusAccepted {
 		t.Fatalf("pull now: %d", got)
+	}
+	var chart chartJSON
+	decode(t, serve(h, apiRequest("GET", "/api/chart?host=web&s=host||mem_used_bytes&s=host||nope&from=0&to=60000", "")), &chart)
+	if len(chart.Series) != 1 || len(chart.Times) != 2 || chart.Values[0][1] == nil || *chart.Values[0][1] != 2000*1024 {
+		t.Fatalf("chart %+v", chart)
+	}
+	if got := serve(h, apiRequest("GET", "/api/chart?host=web&s=bad&from=0&to=60000", "")).Code; got != http.StatusBadRequest {
+		t.Fatalf("bad series name: %d", got)
+	}
+	var latest []latestJSON
+	decode(t, serve(h, apiRequest("GET", "/api/latest?host=web", "")), &latest)
+	if len(latest) == 0 {
+		t.Fatal("no latest values")
+	}
+	var containers []store.ContainerState
+	decode(t, serve(h, apiRequest("GET", "/api/containers?host=web", "")), &containers)
+	if containers == nil {
+		t.Fatal("containers not a list")
+	}
+	// The test host's only sample is 10 s old with a 1 h pull interval:
+	// no problems; its memory is 75% available.
+	if hosts[0].Problems == nil || len(hosts[0].Problems) != 0 || hosts[0].PullIntervalMs != 3_600_000 {
+		t.Fatalf("problems %+v interval %d", hosts[0].Problems, hosts[0].PullIntervalMs)
 	}
 }
 
@@ -256,7 +316,7 @@ func newTestServer(t *testing.T, login bool) *Server {
 		func(pull.Runner, *store.DB, string, []store.Tier, func() time.Time) (pull.Result, error) {
 			return pull.Result{}, nil
 		})
-	opts := Options{Listen: "127.0.0.1:7878", AllowedHosts: []string{"mitosu.lan"}, Tiers: store.DefaultTiers}
+	opts := Options{Listen: "127.0.0.1:7878", AllowedHosts: []string{"mitosu.lan"}, Tiers: store.DefaultTiers, PullInterval: time.Hour}
 	if login {
 		hash, err := auth.Hash(password)
 		if err != nil {

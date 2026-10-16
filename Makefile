@@ -15,6 +15,16 @@ SITE_SRC := ./main.go
 SITE_DST := ./main.o
 
 
+# The web UI, built with npm inside Docker (scripts/web.sh), embedded by
+# the Go build.
+.PHONY: web
+web:
+	scripts/web.sh
+
+.PHONY: build
+build: web
+	CGO_ENABLED=0 go build -trimpath -o mitosu .
+
 download-tools:
 	go install golang.org/x/tools/cmd/goimports@latest
 
@@ -25,21 +35,22 @@ format:
 	gofmt -w -s .
 	goimports -w .
 
-test: format generate
+test: format web
 	go test ./...
 
-test-race: format generate
+test-race: format web
 	go test -race ./... -v
 
-test-verbose: format generate
+test-verbose: format web
 	go test ./... -v
 
-test-clean: format generate
+test-clean: format web
 	go clean -testcache
 
 
+# Releases embed the web UI: build it first (goreleaser checks it is there).
 .PHONY: release
-release:
+release: web
 	docker build -t mitosu:build -f docker/Dockerfile.build docker
 	docker run \
 		--rm \
@@ -51,7 +62,7 @@ release:
 
 
 .PHONY: release-github
-release-github:
+release-github: web
 	docker build -t mitosu:build -f docker/Dockerfile.build docker
 	docker run \
 		--rm \

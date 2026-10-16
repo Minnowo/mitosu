@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -269,6 +270,15 @@ func TestE2EServeWithLogin(t *testing.T) {
 			t.Fatal(err)
 		}
 		return resp
+	}
+	page, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if page.StatusCode != http.StatusOK || !strings.Contains(string(body), "<title>mitosu</title>") {
+		t.Fatalf("web UI: %d %.200s", page.StatusCode, body)
 	}
 	if resp := call("GET", "/api/hosts", "", nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("hosts without login: %d", resp.StatusCode)
