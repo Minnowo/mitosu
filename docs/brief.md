@@ -84,7 +84,7 @@ urfave/cli/v3, x/crypto, x/term.
 | Store              | SQLite via modernc.org/sqlite (pure Go, no cgo), one file under `$XDG_DATA_HOME/mitosu` (or `data_dir`)                                                                                       | Own files; mattn (cgo); bbolt                          | SQL range queries for the UI; static CGO_ENABLED=0 builds keep working    | user      |
 | Store contents     | Derived values, not raw JSON: rates from counter deltas (CPU %, bytes/s, IO/s) and gauges (memory, disk, load), per host, core, filesystem, disk, interface, container        | Raw kanshi lines as blobs                              | Small and directly chartable; raw lines can be re-pulled within 7 days     | default   |
 | Tiers              | Fully configurable list of tiers, each a resolution and how long it is kept, e.g. `tier = raw 180d`, `tier = 1m 2y`, `tier = 1h forever`. Every tier is filled at ingest, so a coarser tier already exists when a finer one expires; `check-config` refuses tiers that are not coarser and kept longer down the list. Defaults: raw 30 d, 1 min 1 year, 1 h forever | Fixed tiers; rolling up only on expiry                  | Storage is cheap at home; the user decides the trade (section 3a)          | user      |
-| Identity           | Host by its configured name; container by compose project + service (else name); cursor per host is (store ID, next seq)                                                       | Container ID                                           | IDs change on every `compose up`                                           | default   |
+| Identity           | Host by its --alias, else host:port; container by name; cursor per host is (store ID, next seq)                                                                               | Container ID; Compose project + service                | IDs change on every `compose up`; Compose names survive it and keep replicas apart | user      |
 | Counter resets     | New `boot_id`, container restart or a counter going down: no rate for that step                                                                                                | Guess across the reset                                 | A wrong spike is worse than a missing point                                |           |
 | Gaps               | Stored explicitly: seq gaps, `lost_through`, a new store ID, and pull failures are rows the UI draws as gaps                                                                   | Interpolate                                            | Silence must not look like "fine" (same rule as kanshi)                   | default   |
 | Web server         | Go net/http; JSON API + the built UI embedded with go:embed. `listen = 127.0.0.1:7878` by default, any address allowed. Host header must match the listen address, localhost or an `allowed_host` line (DNS rebinding); API calls need a custom header (blocks cross-site requests) | Loopback only; separate static server                 | Single binary; reachable where the user chooses                            | user      |
@@ -333,3 +333,69 @@ Each ends with check.sh green, an independent review, and a commit.
   3.2 M inputs with plain and gzip seeds, no failure; run with
   -fuzzminimizetime 0, since minimizing large inputs otherwise stalls the
   run at 0 execs/s for minutes (seen; not a hang in the reader).
+- 2026-10-17, M3 (store): modernc.org/sqlite v1.60.1 added (with
+  modernc.org/libc, mathutil, memory, dustin/go-humanize, google/uuid,
+  ncruces/go-strftime, remyoudompheng/bigfft; BSD-3 or MIT); it needs
+  Go 1.26 in go.mod and raised indirect golang.org/x/sys to v0.48.0 and
+  mattn/go-isatty to v0.0.24. Schema 1 (PRAGMA user_version; a newer one
+  is refused): hosts (cursor: store ID, next seq, last sample line for
+  rates across pulls), series (host, kind, entity, metric), points (raw
+  tier, WITHOUT ROWID, whole numbers stored as integers), rollups (per
+  resolution: n, sum, min, max per bucket, filled at ingest by upsert),
+  samples (coverage), events (seq_gap, lost, store_reset, boot, errors,
+  container; each recorded once). One page per transaction with the
+  cursor: a page is stored whole or not at all. The cursor passes lost
+  samples (max of next and lost_through), so a loss is reported once.
+  Changed from section 3: containers are keyed by name, not Compose
+  project and service (Compose names such as blog-web-1 survive
+  recreation, and project+service would merge scaled replicas). Rates
+  need the same boot_id, time going forward, at most 15 min between
+  samples and no counter going down; containers also the same id and
+  started_at. Container rates use their own counters, host rates the
+  host's. Tiers are validated (only the first may be raw, resolutions
+  nest, keeps do not shrink); `mitosu pull` uses the defaults until the
+  config file (M4). Rollups of a resolution no longer configured are left
+  in the database. Measured (docs/measurements.md): about 20 B per raw
+  value; the brief's estimate (section 3a, 12 MB/day for OVH_4gb) was
+  low by half: about 24 MB/day raw and 8 MB/day of 1-minute buckets, so
+  the defaults settle near 3.6 GB. Found by a test while writing: a
+  sample older than the one before wrapped the time difference and gave
+  a rate (fixed).
+- 2026-10-17, M3 review (independent subagent), 15 findings. Fixed, each
+  with a test checked to fail with its fix undone: seq numbers explained
+  by a reported loss (up to the cursor, or this page's lost_through) are
+  no longer also recorded as a crash gap; a loss in the middle of a page
+  gets its true range (after the last returned sample below it);
+  container events compare with each container's last known state
+  (kept in hosts.containers): an absent section says nothing, a list
+  that may be partial (a containers problem, or 64 entries) marks nothing
+  gone, and a store reset does not re-announce containers; reboots
+  compare with the last known boot_id (hosts.boot_id); problem events
+  fire when the set of failing sources changes (hosts.problems), not on
+  every wording change; the series cache has a mutex (race found with
+  -race and 4 hosts at once); retention deletes rollups and events per
+  series and host so the keys are used (checked with EXPLAIN QUERY PLAN);
+  the database path is made absolute and percent-encoded into the SQLite
+  URI (a '%' in the name opened another, 0644 file), '?' and '#' are now
+  allowed; transactions take the write lock at BEGIN and the schema is
+  created once even by two first opens; an SQLite file with other tables
+  is refused; seq, time_ms, next and lost_through must fit in an int64
+  (checked by the kanshi reader); a sample not newer than the last stored
+  values adds none, so raw points and rollups count the same samples; a
+  series repeated in one sample keeps its first value; error and drop
+  counters are each checked for a reset; `pull` names a host by --alias,
+  else host:port; the request explanation moved to the kanshi package
+  (kanshi.Explain, with pull.Outcome converting an SSH result); pull
+  takes a Runner interface and has tests with a fake kanshi (paging,
+  store recreated, samples deleted, failure); measurements.md corrected.
+  Event times: server time, except a store reset and a loss reported
+  without samples (this machine's clock), noted in the schema comment.
+  Not done in M3: pull failures as gap rows (section 3 Gaps row) need
+  server mode (M4). Waiting for the user: containers keyed by name
+  instead of project+service, and the indirect module upgrades that
+  modernc.org/sqlite requires.
+- 2026-10-17, user decisions on the M3 review: containers stay keyed by
+  name (Identity row updated); the indirect upgrades that
+  modernc.org/sqlite v1.60.1 needs are kept (golang.org/x/sys v0.48.0,
+  mattn/go-isatty v0.0.24, go 1.26 in go.mod; release builds need Go 1.26
+  or newer).

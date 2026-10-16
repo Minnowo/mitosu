@@ -179,6 +179,31 @@ func TestE2EKanshiShellNoiseIsExplained(t *testing.T) {
 	}
 }
 
+func TestE2EPullTwice(t *testing.T) {
+	srv := testServer(t)
+	db := filepath.Join(t.TempDir(), "history", "mitosu.db")
+	args := append([]string{"pull", "--db", db}, srv.flags()...)
+	_, stderr, err := runMitosu(t, args...)
+	if err != nil || !strings.Contains(stderr, "new samples") {
+		t.Fatalf("first pull: %v\n%s", err, stderr)
+	}
+	var first, second int
+	if _, err := fmt.Sscanf(stderr[strings.Index(stderr, ": ")+2:], "%d new samples", &first); err != nil || first == 0 {
+		t.Fatalf("first pull stored %d samples (%v): %s", first, err, stderr)
+	}
+	_, stderr, err = runMitosu(t, args...)
+	if err != nil {
+		t.Fatalf("second pull: %v\n%s", err, stderr)
+	}
+	if _, err := fmt.Sscanf(stderr[strings.Index(stderr, ": ")+2:], "%d new samples", &second); err != nil || second >= first {
+		t.Fatalf("second pull stored %d samples after %d (%v): %s", second, first, err, stderr)
+	}
+	info, err := os.Stat(db)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("database file: %v %v", info, err)
+	}
+}
+
 // flags returns the connection flags for the test server as user dev.
 func (s e2eServer) flags() []string {
 	return []string{"--no-prompt", "--host", s.host, "--port", s.port, "--user", s.user, "--key", s.key, "--known-hosts", s.knownHosts}

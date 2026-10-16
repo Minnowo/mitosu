@@ -6,6 +6,7 @@ package kanshi
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 )
 
@@ -38,10 +39,14 @@ var (
 	imagePattern  = regexp.MustCompile(`^[\x21-\x7e]+$`)
 )
 
-// checkSample checks a sample: the errors list is present, at least one
+// checkSample checks a sample: seq and time_ms fit in an int64 (as
+// databases store them), the errors list is present, at least one
 // section is, lists are within their caps, names and IDs have their
 // documented form, and strings are within their caps.
 func checkSample(s *Sample) error {
+	if s.Seq > math.MaxInt64 || s.TimeMs > math.MaxInt64 {
+		return fmt.Errorf("%w: sample seq %d or time_ms %d out of range", ErrProtocol, s.Seq, s.TimeMs)
+	}
 	if s.Errors == nil {
 		return fmt.Errorf("%w: sample %d has no errors list", ErrProtocol, s.Seq)
 	}

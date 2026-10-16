@@ -61,6 +61,17 @@ func main() {
 				},
 			},
 			{
+				Name:  "pull",
+				Usage: "Store a server's new kanshi samples in the local history",
+				Flags: append(connectionFlags(),
+					&cli.StringFlag{
+						Name:  "db",
+						Usage: "The history database. Default: $XDG_DATA_HOME/mitosu/mitosu.db, else ~/.local/share/mitosu/mitosu.db.",
+					},
+				),
+				Action: cmd.CmdPull,
+			},
+			{
 				Name:        "stat",
 				Description: "See stats of a server",
 				Flags: append(connectionFlags(),

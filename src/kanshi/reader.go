@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -166,6 +167,9 @@ func ReadExport(r io.Reader, since, limit uint64, onSample func(Sample, []byte) 
 			var end End
 			if err := decode(line, &end); err != nil {
 				return header, End{}, err
+			}
+			if end.Next > math.MaxInt64 || end.LostThrough > math.MaxInt64 {
+				return header, End{}, fmt.Errorf("%w: end next %d or lost_through %d out of range", ErrProtocol, end.Next, end.LostThrough)
 			}
 			if end.Next != last {
 				return header, End{}, fmt.Errorf("%w: end next %d, want %d", ErrProtocol, end.Next, last)

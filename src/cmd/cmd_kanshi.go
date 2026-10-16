@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +17,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"mitosu/src/kanshi"
-	"mitosu/src/ssh"
+	"mitosu/src/pull"
 )
 
 const (
@@ -48,7 +47,7 @@ func CmdKanshiVersion(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if err := kanshiResultError(res); err != nil {
+	if err := kanshi.Explain(pull.Outcome(res)); err != nil {
 		return err
 	}
 	fmt.Printf("kanshi %s, protocol %s\n", kanshi.Printable(v.Kanshi), kanshi.Printable(v.Format))
@@ -92,7 +91,7 @@ func CmdKanshiExport(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if err := kanshiResultError(res); err != nil {
+	if err := kanshi.Explain(pull.Outcome(res)); err != nil {
 		return err
 	}
 
@@ -106,36 +105,4 @@ func CmdKanshiExport(ctx context.Context, c *cli.Command) error {
 	fmt.Fprintf(os.Stderr, "store %s (kanshi %s, protocol %s): %d samples after %d, next %d, more %v, lost through %d\n",
 		header.Store, kanshi.Printable(header.Kanshi), kanshi.Printable(header.Format), count, since, end.Next, end.More, end.LostThrough)
 	return nil
-}
-
-// kanshiResultError explains a failed kanshi request from the reader's
-// error and what the server said. kanshi output that is not kanshi's
-// first line is reported as shell noise whatever the exit status: the
-// reader stops at once and Exec then cuts kanshi off, so a non-zero status
-// is expected there.
-func kanshiResultError(res ssh.ExecResult) error {
-	if res.ReadErr == nil {
-		return nil
-	}
-	exit := fmt.Sprintf("exit %d", res.Status)
-	if res.Signal != "" {
-		exit = "killed by " + kanshi.Printable(res.Signal)
-	}
-	if res.Stderr != "" {
-		exit += ": " + kanshi.Printable(res.Stderr)
-	}
-	var serverErr *kanshi.ServerError
-	switch {
-	case res.TimedOut:
-		return fmt.Errorf("kanshi did not finish in time (%s): %w", exit, res.ReadErr)
-	case errors.As(res.ReadErr, &serverErr):
-		return res.ReadErr
-	case errors.Is(res.ReadErr, kanshi.ErrNoOutput) && res.Status == 127:
-		return fmt.Errorf("kanshi is not installed on the server, or not on the login's PATH (%s)", exit)
-	case errors.Is(res.ReadErr, kanshi.ErrNoOutput):
-		return fmt.Errorf("kanshi printed nothing (%s)", exit)
-	case errors.Is(res.ReadErr, kanshi.ErrNotKanshiOutput):
-		return fmt.Errorf("%w: the login printed text before kanshi did; shell startup files (such as ~/.bashrc) must print to stderr or nothing (%s)", res.ReadErr, exit)
-	}
-	return fmt.Errorf("%w (%s)", res.ReadErr, exit)
 }

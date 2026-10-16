@@ -5,3 +5,4 @@ github.com/rs/zerolog
 github.com/urfave/cli/v3
 golang.org/x/crypto
 golang.org/x/term
+modernc.org/sqlite

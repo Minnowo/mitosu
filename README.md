@@ -27,6 +27,23 @@ first line is refused, so startup files must print to stderr or
 nothing. `version` gives up after 30 s and `export` after 10 minutes.
 Every failure exits with status 1.
 
+## Keeping history
+
+```
+mitosu pull --alias myserver
+```
+
+stores every sample kanshi has after the last pull (under the name
+given to `--alias`, or `host:port` with `--host`) in a local SQLite
+database (`$XDG_DATA_HOME/mitosu/mitosu.db`, else
+`~/.local/share/mitosu/mitosu.db`, or `--db FILE`; created 0600). Values
+are kept raw for 30 days, as 1-minute buckets for a year and as 1-hour
+buckets forever. Rates (CPU, network, disk, container CPU) come from two
+consecutive samples and are left out across a reboot, a restarted
+container or a gap over 15 minutes. Gaps, lost samples, reboots and
+container changes are recorded as events. A failed or interrupted pull
+keeps what it stored and the next one continues from there.
+
 ## Connecting
 
 `--alias <name>` reads `~/.ssh/config` and `/etc/ssh/ssh_config` (or only
