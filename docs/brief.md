@@ -187,6 +187,10 @@ github.com/ncruces/go-strftime, github.com/remyoudompheng/bigfft
 (BSD-3 or MIT; all compatible with AGPL-3.0). An allowlist in
 scripts/check.sh fails the build on anything else, as in kanshi.
 
+Vendored: src/knownhosts is x/crypto v0.46.0's ssh/knownhosts/knownhosts.go
+(BSD-3-Clause, license beside it) with the changes listed in its header
+(M1 review, 2026-10-17).
+
 ## 6. Milestones
 
 Each ends with check.sh green, an independent review, and a commit.
@@ -243,3 +247,45 @@ Each ends with check.sh green, an independent review, and a commit.
   rule was checked to fail when broken. Test helpers for kanshi's test
   server move to M1, where the first test needs them. The independent
   review of M0 is folded into M1's.
+- 2026-10-17, M1 (SSH): host keys checked with x/crypto knownhosts; the
+  host key algorithms offered are limited to the key types known_hosts
+  has for the host (without this the test server offers ECDSA first and
+  a correctly recorded ed25519 key looks "changed"; shown by e2e). The
+  ssh_config parser was rewritten to OpenSSH rules (first value wins,
+  Host patterns with negation, Include up to 16 deep, tokens, ${VAR},
+  quotes and '=', one argument for single-value keywords); Match is
+  skipped with a warning; ProxyJump/ProxyCommand are refused instead of
+  connecting directly. "Alias not found" is gone: like `ssh name`, an
+  unmatched name is used as the host name. --host alone reads no config
+  (kept from the user's commit 15ed47b). Agent and key-file keys share one
+  publickey method, agent first: x/crypto tries each method name once, so
+  the agent was never tried after a key-file failure. Passphrase-protected
+  keys are decrypted only if the server accepts them. Dial plus handshake
+  time out after 30 s (2 min when a prompt is possible). Fixed with tests
+  first: the crash list in section 2, port 0 (shown failing on the old
+  parser), CPU NaN / reset / missing steal, a short df line, and `stat
+  --no-prompt` asking for a sudo password without --with-root.
+  Keepalive and reconnect move to M4, their first user. scripts/e2e.sh
+  runs TestE2E* against kanshi's test server.
+- 2026-10-17, M1 review (independent subagent), 12 findings, all fixed
+  with tests (each checked to fail with its fix reverted, except where
+  the reviewer's own reproduction stood in):
+  host certificates (@cert-authority) now work: certificate algorithms
+  are offered and a CA line no longer turns an unknown plain key into a
+  false "changed" warning; HostKeyAlias is looked up without the port;
+  a bad line or unreadable known_hosts file is skipped with a warning
+  instead of refusing every host (x/crypto's knownhosts.go is vendored in
+  src/knownhosts with these changes marked; no new module); a locked key
+  that cannot be unlocked is not offered (one failed signature ends all
+  public key auth in x/crypto), prompts are per key and repeat 3 times;
+  key order follows OpenSSH (identity files first, through the agent
+  when it holds them; IdentitiesOnly honoured); Match criteria all, host,
+  originalhost, user, localuser are evaluated, and a Match that cannot be
+  evaluated is refused if it would set a still-unset routing keyword
+  (ProxyJump, HostName, Port, User, HostKeyAlias, known_hosts files) or
+  Include; Include in user configs is relative to ~/.ssh; --config reads
+  only that file (like ssh -F); command-line flags are seeded as
+  first values so tokens such as %h see --host; connect timeout 30 s,
+  handshake 30 s only without prompting (a prompt has no deadline); README
+  lists the --user and default-key changes. Tests now include an
+  in-process SSH server and ssh-agent (src/ssh/server_test.go).

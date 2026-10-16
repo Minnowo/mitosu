@@ -228,11 +228,17 @@ web/               the web UI (from milestone 5; npm runs in Docker only)
 check:  scripts/check.sh   (gofmt, go vet, tests with -race, static build, rules)
 build:  CGO_ENABLED=0 go build -trimpath .
 test:   go test ./...
+e2e:    scripts/e2e.sh     (TestE2E* over real SSH against kanshi's test server)
 ```
 
+Run scripts/e2e.sh before committing changes to src/ssh, src/cmd or
+anything that talks to a server; it needs Docker, so check.sh does not
+run it.
+
 Go is at ~/.local/go/bin on the dev machine; check.sh adds it to PATH.
-Integration tests that need SSH use kanshi's test server
-(`../kanshi/testserver/run.sh`, 127.0.0.1:2222).
+End-to-end tests (`e2e_test.go`, `TestE2E*`) use kanshi's test server
+(`../kanshi/testserver/run.sh`, 127.0.0.1:2222); they skip without the
+variables scripts/e2e.sh sets, and that script fails on any skip.
 
 ### Language notes
 

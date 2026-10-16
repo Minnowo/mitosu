@@ -32,14 +32,10 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 	noPrompt := c.Value("no-prompt").(bool)
 	noPassSudo := c.Value("no-pass-sudo").(bool)
 
-	sshConfig := ssh.ExpandPath(c.Value("config").(string))
-	sshAlias := c.Value("alias").(string)
-	sshHost := c.Value("host").(string)
-	sshPort := c.Value("port").(int)
-	sshUser := c.Value("user").(string)
-	sshKey := ssh.ExpandPath(c.Value("key").(string))
-	sshUserPassword := c.Value("user-pass").(string)
-	sshKeyPassword := c.Value("key-pass").(string)
+	section, err := hostSection(c)
+	if err != nil {
+		return err
+	}
 
 	log.Debug().
 		Uint("poll", poll).
@@ -48,71 +44,33 @@ func CmdStat(ctx context.Context, c *cli.Command, systemStats []data.SystemStat)
 		Bool("json", jsonOutput).
 		Bool("no-prompt", noPrompt).
 		Bool("color", !noColor).
-		Str("path", sshConfig).
-		Str("alias", sshAlias).
-		Str("host", sshHost).
-		Int("port", sshPort).
-		Str("user", sshUser).
-		Str("key", sshKey).
+		Str("name", section.Name).
+		Str("host", section.Hostname).
+		Int("port", section.Port).
+		Str("user", section.User).
+		Strs("keys", section.IdentityFiles).
+		Strs("known_hosts", section.KnownHostsFiles).
 		Msg("About to run stat")
 
 	client := ssh.SSHClient{
-		Config: ssh.Section{
-			Name:         "mitosu CLI",
-			Hostname:     sshHost,
-			Port:         sshPort,
-			User:         sshUser,
-			IdentityFile: sshKey,
-		},
+		Config: section,
 		Passwords: ssh.SSHPasswords{
-			KeyPassword:  sshKeyPassword,
-			UserPassword: sshUserPassword,
+			KeyPassword:  c.String("key-pass"),
+			UserPassword: c.String("user-pass"),
 			CanPrompt:    !noPrompt,
 		},
 		SudoRequiresPassword: !noPassSudo,
 	}
 
-	if sshAlias != "" {
-
-		config, err := ssh.ParseConfig(sshConfig)
-
-		if err != nil {
-			return err
-		}
-
-		for _, section := range config.Sections {
-
-			if sshAlias != section.Name {
-				continue
-			}
-
-			log.Debug().
-				Str("alias", sshAlias).
-				Str("user", section.User).
-				Str("host", section.Hostname).
-				Int("port", section.Port).
-				Str("key", section.IdentityFile).
-				Msg("Found ssh host alias")
-
-			client.Config = section
-
-			if err := client.Connect(); err != nil {
-				return err
-			} else {
-				break
-			}
-		}
-	} else if err := client.Connect(); err != nil {
+	if err := client.Connect(); err != nil {
 		return err
-	}
-
-	if client.Client == nil {
-		return fmt.Errorf("Could not get ssh connection")
 	}
 	defer client.Close()
 
-	if err := client.PromptRootPass(); err != nil {
-		return err
+	if withRoot {
+		if err := client.PromptRootPass(); err != nil {
+			return err
+		}
 	}
 
 	sh := shell.PosixShell{}

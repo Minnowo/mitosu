@@ -91,15 +91,13 @@ func main() {
 					&cli.IntFlag{
 						Name:     "port",
 						Aliases:  []string{"p"},
-						Usage:    "The remote SSH port.",
-						Value:    22,
+						Usage:    "The remote SSH port. Default: the ssh config's Port, else 22.",
 						Required: false,
 					},
 					&cli.StringFlag{
 						Name:     "user",
 						Aliases:  []string{"u"},
-						Usage:    "The user to SSH as.",
-						Value:    "root",
+						Usage:    "The user to SSH as. Default: the ssh config's User, else the local user.",
 						Required: false,
 					},
 					&cli.StringFlag{
@@ -112,6 +110,11 @@ func main() {
 						Name:     "key",
 						Aliases:  []string{"i"},
 						Usage:    "The SSH private key file path.",
+						Required: false,
+					},
+					&cli.StringFlag{
+						Name:     "known-hosts",
+						Usage:    "The known_hosts file to check the server's host key against. Default: the ssh config's, else ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts. Unknown or changed keys are refused.",
 						Required: false,
 					},
 					&cli.StringFlag{

@@ -8,4 +8,5 @@ src/data: src/shell
 src/display:
 src/logger:
 src/shell:
-src/ssh: src/shell
+src/ssh: src/shell src/knownhosts
+src/knownhosts:

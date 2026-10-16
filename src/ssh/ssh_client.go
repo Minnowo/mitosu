@@ -1,3 +1,6 @@
+// An SSH connection to one host: connecting with host key checking and
+// authentication, and running remote commands.
+
 package ssh
 
 import (
@@ -8,9 +11,20 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	gossh "golang.org/x/crypto/ssh"
+)
+
+const (
+	// DefaultConnectTimeout bounds the TCP connect.
+	DefaultConnectTimeout = 30 * time.Second
+
+	// DefaultHandshakeTimeout bounds the SSH handshake, authentication
+	// included, when nobody can be prompted for a password. With prompting
+	// the handshake has no deadline: a person is waiting and can cancel.
+	DefaultHandshakeTimeout = 30 * time.Second
 )
 
 type SSHPasswords struct {
@@ -24,38 +38,51 @@ type SSHClient struct {
 	Config               Section
 	Passwords            SSHPasswords
 	SudoRequiresPassword bool
+
+	// ConnectTimeout and HandshakeTimeout override the defaults when not
+	// zero.
+	ConnectTimeout   time.Duration
+	HandshakeTimeout time.Duration
 }
 
+// Connect dials s.Config, verifies the host key against
+// s.Config.KnownHostsFiles (unknown or changed keys are refused, see
+// HostKeyCheck) and authenticates with the agent and key files, then a
+// password. The TCP connect gives up after DefaultConnectTimeout and,
+// unless s.Passwords.CanPrompt, the handshake after
+// DefaultHandshakeTimeout (see the fields to override them). On
+// success it replaces any previous connection.
 func (s *SSHClient) Connect() error {
 
-	authMethods := make([]gossh.AuthMethod, 0, 3)
+	hostKeyCallback, hostKeyAlgorithms := HostKeyCheck(s.Config.KnownHostsFiles, s.Config.KnownHostsAddress(), s.Config.VerifyHint())
 
-	if m, err := GetKeyAuthMethod(s.Config.IdentityFile, &s.Passwords); err == nil {
-		authMethods = append(authMethods, m)
-	} else {
-		log.Debug().Err(err).Msg("Could not get key auth method")
-	}
-
-	if m, err := GetAgentAuthMethod(s.Config.User, s.Config.Hostname); err == nil {
-		authMethods = append(authMethods, m)
-	} else {
-		log.Debug().Err(err).Msg("Could not get ssh agent auth method")
-	}
-
-	m := GetPasswordAuthMethod(s.Config.User, s.Config.Hostname, &s.Passwords)
-	authMethods = append(authMethods, m)
+	keyAuth, closeAgent := PublicKeyAuth(s.Config, &s.Passwords)
+	defer closeAgent()
 
 	config := &gossh.ClientConfig{
 		User: s.Config.User,
-		Auth: authMethods,
-		HostKeyCallback: func(hostname string, _ net.Addr, _ gossh.PublicKey) error {
-			log.Debug().Str("host", hostname).Msg("Connecting to remote")
-			return nil
+		Auth: []gossh.AuthMethod{
+			keyAuth,
+			GetPasswordAuthMethod(s.Config.User, s.Config.Hostname, &s.Passwords),
 		},
+		HostKeyCallback:   hostKeyCallback,
+		HostKeyAlgorithms: hostKeyAlgorithms,
+		Timeout:           DefaultConnectTimeout,
+	}
+	if s.ConnectTimeout != 0 {
+		config.Timeout = s.ConnectTimeout
+	}
+	handshake := DefaultHandshakeTimeout
+	if s.HandshakeTimeout != 0 {
+		handshake = s.HandshakeTimeout
+	}
+	if s.Passwords.CanPrompt {
+		handshake = 0
 	}
 
-	addr := s.Config.Hostname + ":" + strconv.Itoa(s.Config.Port)
-	client, err := gossh.Dial("tcp", addr, config)
+	addr := net.JoinHostPort(s.Config.Hostname, strconv.Itoa(s.Config.Port))
+	log.Debug().Str("addr", addr).Str("user", s.Config.User).Msg("Connecting")
+	client, err := dial(addr, config, handshake)
 
 	if err != nil {
 		return err
@@ -68,6 +95,31 @@ func (s *SSHClient) Connect() error {
 	s.Client = client
 
 	return nil
+}
+
+// dial connects to addr within config.Timeout, then runs the SSH
+// handshake within handshake (no limit if 0).
+func dial(addr string, config *gossh.ClientConfig, handshake time.Duration) (*gossh.Client, error) {
+	conn, err := net.DialTimeout("tcp", addr, config.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	if handshake > 0 {
+		if err := conn.SetDeadline(time.Now().Add(handshake)); err != nil {
+			conn.Close()
+			return nil, err
+		}
+	}
+	c, chans, reqs, err := gossh.NewClientConn(conn, addr, config)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return gossh.NewClient(c, chans, reqs), nil
 }
 
 func (s *SSHClient) Close() error {
