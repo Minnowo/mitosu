@@ -1,0 +1,7 @@
+# Direct Go module dependencies approved in docs/brief.md section 5. One
+# module path per line. scripts/check.sh fails if go.mod requires a direct
+# dependency not listed here.
+github.com/rs/zerolog
+github.com/urfave/cli/v3
+golang.org/x/crypto
+golang.org/x/term
