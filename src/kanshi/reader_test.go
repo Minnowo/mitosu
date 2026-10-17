@@ -24,7 +24,7 @@ func TestGoldenVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Kanshi != "1.0.0" || v.Format != "1.0" {
+	if v.Kanshi != "1.0.1" || v.Format != "1.0" {
 		t.Fatalf("got %+v", v)
 	}
 }

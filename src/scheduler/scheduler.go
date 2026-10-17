@@ -40,6 +40,9 @@ type Conn interface {
 	// Alive reports whether the connection still answers; a dead one is
 	// closed.
 	Alive(timeout time.Duration) bool
+	// Closed reports, without sending anything, whether the connection
+	// has ended.
+	Closed() bool
 	Close() error
 }
 
@@ -163,7 +166,8 @@ func (s *Scheduler) PullNow(host string) error {
 // there is none), like ssh.SSHClient.ExecContext, for the live views: at
 // most maxLive at once per host (others wait, until ctx is done), and
 // without the liveness check pulls make, which may take seconds on a busy
-// link. It returns ErrUnknownHost for a host not in the config and
+// link; a connection known to have ended is replaced, and one whose
+// command hit its deadline is checked in the background. It returns ErrUnknownHost for a host not in the config and
 // ErrNotRunning while Run is not running.
 func (s *Scheduler) Exec(ctx context.Context, host, command string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error) {
 	hc, ok := s.conns[host]
@@ -180,7 +184,14 @@ func (s *Scheduler) Exec(ctx context.Context, host, command string, timeout time
 	if err != nil {
 		return ssh.ExecResult{}, err
 	}
-	return c.ExecContext(ctx, command, timeout, read)
+	res, err := c.ExecContext(ctx, command, timeout, read)
+	if res.TimedOut && ctx.Err() == nil {
+		// A command that hit its deadline may be stuck on a silent link:
+		// check it in the background (Alive closes a dead connection,
+		// and conn replaces a closed one).
+		go c.Alive(aliveTimeout)
+	}
+	return res, err
 }
 
 // runHost is one host's loop.
@@ -272,14 +283,17 @@ func (s *Scheduler) runHost(ctx context.Context, host string) {
 	}
 }
 
-// conn returns host's connection: the kept one (with check, only if it
-// still answers), else a new one (connecting gives up when ctx or Run's
+// conn returns host's connection: the kept one (unless it has ended;
+// with check, only if it still answers), else a new one (connecting gives up when ctx or Run's
 // context ends).
 func (s *Scheduler) conn(ctx context.Context, host string, hc *hostConn, check bool) (Conn, error) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 	if hc.running == nil {
 		return nil, ErrNotRunning
+	}
+	if hc.client != nil && hc.client.Closed() {
+		hc.client = nil
 	}
 	if check && hc.client != nil && !hc.client.Alive(aliveTimeout) {
 		log.Info().Str("host", host).Msg("Connection lost; reconnecting")

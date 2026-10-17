@@ -55,10 +55,17 @@ type output struct {
 
 // run runs command on host and returns its output, or an error that says
 // what went wrong in words a user can act on. tool names the program for
-// those messages.
-func run(ctx context.Context, r Runner, host, tool, command string) (output, error) {
+// those messages. Output over maxOutput is cut off at the end, or with
+// keepEnd at the start (the whole output is read, and the first line
+// kept is a whole one).
+func run(ctx context.Context, r Runner, host, tool, command string, keepEnd bool) (output, error) {
 	var out output
 	res, err := r.Exec(ctx, host, command, timeout, func(rd io.Reader) error {
+		if keepEnd {
+			b, truncated, err := readEnd(rd, maxOutput)
+			out.stdout, out.truncated = b, truncated
+			return err
+		}
 		var buf bytes.Buffer
 		n, err := io.Copy(&buf, io.LimitReader(rd, maxOutput+1))
 		if err != nil {
@@ -119,4 +126,40 @@ func (o Options) sudo() string {
 		return "sudo -n "
 	}
 	return ""
+}
+
+// readEnd reads rd to the end and returns its last max bytes at most,
+// starting after a newline if anything was dropped, and whether anything
+// was. It holds about 2*max bytes at most (plus one read and the slack
+// of a growing slice).
+func readEnd(rd io.Reader, max int) ([]byte, bool, error) {
+	buf := make([]byte, 0, 64*1024)
+	chunk := make([]byte, 64*1024)
+	dropped := false
+	for {
+		n, err := rd.Read(chunk)
+		buf = append(buf, chunk[:n]...)
+		if len(buf) > 2*max {
+			buf = append(buf[:0], buf[len(buf)-max:]...)
+			dropped = true
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if len(buf) > max {
+		buf = buf[len(buf)-max:]
+		dropped = true
+	}
+	if dropped {
+		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+			buf = buf[i+1:]
+		} else {
+			buf = buf[:0]
+		}
+	}
+	return buf, dropped, nil
 }

@@ -24,6 +24,23 @@ const (
 	pageTimeout = 10 * time.Minute
 )
 
+// maxPageBytes caps the sample lines one page may hold (a variable for
+// tests). A page over it is asked for again with --limit set to the
+// samples that fitted (at least one: a line is at most 1 MiB, the
+// reader's cap), and that limit is kept for the rest of the pull (a
+// host with large samples would otherwise waste every other request).
+var maxPageBytes = 64 << 20
+
+// pageTooBigError is returned by fetch for a page over maxPageBytes;
+// Fitted samples came before the cap was reached.
+type pageTooBigError struct {
+	Fitted int
+}
+
+func (e *pageTooBigError) Error() string {
+	return fmt.Sprintf("page over the %d MiB memory cap", maxPageBytes>>20)
+}
+
 // Runner runs a remote command; *ssh.SSHClient is one.
 type Runner interface {
 	Exec(command string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error)
@@ -51,12 +68,19 @@ func Pull(client Runner, db *store.DB, host string, tiers []store.Tier, now func
 	if err := store.ValidateTiers(tiers); err != nil {
 		return result, err
 	}
+	limit := PageSize
 	for {
 		cursor, err := db.Cursor(host)
 		if err != nil {
 			return result, err
 		}
-		page, err := fetch(client, cursor.Next)
+		page, err := fetch(client, cursor.Next, limit)
+		var tooBig *pageTooBigError
+		if errors.As(err, &tooBig) && limit > 1 {
+			result.Pages++
+			limit = max(1, tooBig.Fitted)
+			continue
+		}
 		if err != nil {
 			return result, err
 		}
@@ -93,16 +117,23 @@ func Pull(client Runner, db *store.DB, host string, tiers []store.Tier, now func
 	return result, err
 }
 
-// fetch runs one export after since and returns the checked page.
-func fetch(client Runner, since uint64) (store.Page, error) {
-	command, err := kanshi.ExportCommand(since, PageSize, true)
+// fetch runs one export of at most limit samples after since and returns
+// the checked page, or a *pageTooBigError.
+func fetch(client Runner, since uint64, limit int) (store.Page, error) {
+	command, err := kanshi.ExportCommand(since, uint64(limit), true)
 	if err != nil {
 		return store.Page{}, err
 	}
 	page := store.Page{Since: since}
+	held, fitted := 0, 0
 	res, err := client.Exec(command, pageTimeout, func(r io.Reader) error {
 		var readErr error
-		page.Header, page.End, readErr = kanshi.ReadExport(r, since, PageSize, func(s kanshi.Sample, line []byte) error {
+		page.Header, page.End, readErr = kanshi.ReadExport(r, since, uint64(limit), func(s kanshi.Sample, line []byte) error {
+			held += len(line)
+			if held > maxPageBytes {
+				return &pageTooBigError{Fitted: fitted}
+			}
+			fitted++
 			page.Samples = append(page.Samples, store.PulledSample{Sample: s, Line: append([]byte(nil), line...)})
 			return nil
 		})
@@ -110,6 +141,10 @@ func fetch(client Runner, since uint64) (store.Page, error) {
 	})
 	if err != nil {
 		return store.Page{}, fmt.Errorf("kanshi export: %w", err)
+	}
+	var tooBig *pageTooBigError
+	if errors.As(res.ReadErr, &tooBig) {
+		return store.Page{}, tooBig
 	}
 	if err := kanshi.Explain(Outcome(res)); err != nil {
 		return store.Page{}, err

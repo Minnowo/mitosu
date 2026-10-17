@@ -14,7 +14,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +37,9 @@ type SSHPasswords struct {
 	CanPrompt    bool
 }
 
+// SSHClient is one SSH connection. Exec, ExecContext, Alive and Closed
+// may be called from several goroutines; Connect may not run while any
+// of them does.
 type SSHClient struct {
 	*gossh.Client
 	Config               Section
@@ -48,6 +50,9 @@ type SSHClient struct {
 	// zero.
 	ConnectTimeout   time.Duration
 	HandshakeTimeout time.Duration
+
+	// closed is closed when the current connection has ended.
+	closed chan struct{}
 }
 
 // Connect dials s.Config, verifies the host key against
@@ -103,8 +108,28 @@ func (s *SSHClient) ConnectContext(ctx context.Context) error {
 	}
 
 	s.Client = client
+	closed := make(chan struct{})
+	s.closed = closed
+	go func() {
+		client.Wait()
+		close(closed)
+	}()
 
 	return nil
+}
+
+// Closed reports whether the connection has ended (closed by either side
+// or lost), without sending anything. It is true before Connect.
+func (s *SSHClient) Closed() bool {
+	if s.closed == nil {
+		return true
+	}
+	select {
+	case <-s.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 // dial connects to addr within config.Timeout, then runs the SSH
@@ -195,15 +220,51 @@ func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Rea
 }
 
 // ExecContext is Exec that also stops the command, as at its deadline,
-// when ctx is done (for example the browser that asked went away).
+// when ctx is done (for example the browser that asked went away). If ctx
+// ends before the session is open, it returns ctx.Err() at once and keeps
+// the connection (the session is closed when it opens; the connection is
+// dropped only if it does not open by the deadline).
 func (s *SSHClient) ExecContext(ctx context.Context, command string, timeout time.Duration, read func(io.Reader) error) (ExecResult, error) {
 	log.Debug().Str("command", command).Msg("Running command")
 
 	// The deadline covers opening the session too: a server can leave a
-	// channel open request unanswered. Until a session exists, the only
-	// way to stop waiting is to drop the connection.
-	var mu sync.Mutex
+	// channel open request unanswered, and then the only way to stop
+	// waiting is to drop the connection. A cancelled ctx alone does not
+	// drop it (it is shared): the session is closed when it opens.
+	deadline := time.Now().Add(timeout)
+	type opened struct {
+		session *gossh.Session
+		err     error
+	}
+	openedCh := make(chan opened, 1)
+	go func() {
+		sess, err := s.Client.NewSession()
+		openedCh <- opened{sess, err}
+	}()
 	var session *gossh.Session
+	select {
+	case o := <-openedCh:
+		if o.err != nil {
+			return ExecResult{Status: -1}, o.err
+		}
+		session = o.session
+	case <-ctx.Done():
+		go func() {
+			select {
+			case o := <-openedCh:
+				if o.err == nil {
+					closeSession(o.session)
+				}
+			case <-time.After(time.Until(deadline)):
+				s.Client.Close()
+			}
+		}()
+		return ExecResult{Status: -1}, ctx.Err()
+	case <-time.After(time.Until(deadline)):
+		s.Client.Close()
+		return ExecResult{Status: -1, TimedOut: true}, errors.New("ssh: opening a session timed out")
+	}
+
 	done := make(chan struct{})
 	var timedOut atomic.Bool
 	go func() {
@@ -211,17 +272,10 @@ func (s *SSHClient) ExecContext(ctx context.Context, command string, timeout tim
 		case <-done:
 			return
 		case <-ctx.Done():
-		case <-time.After(timeout):
+		case <-time.After(time.Until(deadline)):
 		}
 		timedOut.Store(true)
-		mu.Lock()
-		sess := session
-		mu.Unlock()
-		if sess == nil {
-			s.Client.Close()
-			return
-		}
-		closeSession(sess)
+		closeSession(session)
 		select {
 		case <-done:
 		case <-time.After(execGrace):
@@ -229,14 +283,6 @@ func (s *SSHClient) ExecContext(ctx context.Context, command string, timeout tim
 		}
 	}()
 	defer close(done)
-
-	sess, err := s.Client.NewSession()
-	if err != nil {
-		return ExecResult{Status: -1, TimedOut: timedOut.Load()}, err
-	}
-	mu.Lock()
-	session = sess
-	mu.Unlock()
 
 	stderr := &cappedBuffer{max: maxStderr}
 	session.Stderr = stderr

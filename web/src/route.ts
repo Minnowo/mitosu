@@ -13,7 +13,11 @@ export function parseRoute(hash: string): Route {
     const params = new URLSearchParams(query);
     const m = /^\/host\/(.+)$/.exec(path);
     if (m && m[1]) {
-        return {page: 'host', host: decodeURIComponent(m[1]), params};
+        try {
+            return {page: 'host', host: decodeURIComponent(m[1]), params};
+        } catch {
+            // A hand-edited hash such as #/host/% is not a host.
+        }
     }
     return {page: 'overview', host: '', params};
 }

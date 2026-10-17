@@ -289,6 +289,29 @@ func TestLogsParsing(t *testing.T) {
 	}
 }
 
+// Long lines can fill the output cap. Docker logs come oldest first, so
+// the cap keeps the end: the newest lines and docker's exit line, and the
+// cut-off oldest lines stay reachable through Older.
+func TestLogsOverTheOutputCapKeepTheNewestLines(t *testing.T) {
+	line := "2026-10-16T23:50:23.000000000Z " + strings.Repeat("x", 8000) + "\n"
+	body := strings.Repeat(line, maxOutput/len(line)+10) + "2026-10-16T23:59:59.000000000Z newest\n"
+	res, err := Logs(context.Background(), &fake{stdout: body + exitMarker + "0\n"}, Options{}, "web", "web", 2000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || len(res.Lines) < 2 || res.Lines[len(res.Lines)-1].Text != "newest" || res.Older != res.Lines[0].TS {
+		t.Fatalf("truncated %v, %d lines, older %q", res.Truncated, len(res.Lines), res.Older)
+	}
+	if len(res.Lines[0].Text) != 8000 {
+		t.Fatalf("first line cut: %d bytes", len(res.Lines[0].Text))
+	}
+	// A failure after long output is still a failure.
+	_, err = Logs(context.Background(), &fake{stdout: body + "error from daemon in stream: Error grabbing logs\n" + exitMarker + "1\n"}, Options{}, "web", "web", 2000, "")
+	if err == nil || !strings.Contains(err.Error(), "Error grabbing logs") {
+		t.Fatalf("failure after long output: %v", err)
+	}
+}
+
 func TestFailuresAreExplained(t *testing.T) {
 	ctx := context.Background()
 	logs := []struct {

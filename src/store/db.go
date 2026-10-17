@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rs/zerolog/log"
 	_ "modernc.org/sqlite"
 )
 
@@ -120,7 +121,8 @@ func DefaultPath() (string, error) {
 
 // Open opens or creates the database at path. A new directory is made
 // 0700 and a new file 0600, since the history names the user's servers
-// and containers. It returns an error for a database written by a newer
+// and containers; an existing file others can access is logged as a
+// warning (its mode is the user's to change). It returns an error for a database written by a newer
 // mitosu and for an SQLite file that is not mitosu's.
 func Open(path string) (*DB, error) {
 	abs, err := filepath.Abs(path)
@@ -134,8 +136,17 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("store: %w", err)
+	}
 	if err := f.Close(); err != nil {
 		return nil, fmt.Errorf("store: %w", err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		// SQLite gives its -wal and -shm files the same mode.
+		log.Warn().Str("path", abs).Str("mode", info.Mode().Perm().String()).Msg("The database can be read by other users; chmod 600 it")
 	}
 
 	conn, err := sql.Open("sqlite", sqliteURI(abs))

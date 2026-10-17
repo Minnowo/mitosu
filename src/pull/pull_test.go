@@ -89,6 +89,30 @@ func TestPullFailureStoresNothing(t *testing.T) {
 	}
 }
 
+// A page over the memory cap is asked for again with a smaller --limit,
+// so a hostile server cannot make a pull hold gigabytes and a host with
+// large samples still gets pulled.
+func TestPullShrinksPagesOverTheMemoryCap(t *testing.T) {
+	old := maxPageBytes
+	maxPageBytes = 100 * 300
+	t.Cleanup(func() { maxPageBytes = old })
+	k := &fakeKanshi{store: storeA, first: 1, last: 2500}
+	db := openDB(t)
+	res, err := Pull(k, db, "web", store.DefaultTiers, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Samples != 2500 || res.Cursor.Next != 2500 {
+		t.Fatalf("result %+v", res)
+	}
+	// The retry asks for about as many samples as fitted (lines grow by a
+	// byte with each digit of seq, so later pages may shrink a little).
+	last := k.limits[len(k.limits)-1]
+	if k.limits[0] != PageSize || k.limits[1]*200 > uint64(maxPageBytes) || k.limits[1]*400 < uint64(maxPageBytes) || last < 2 {
+		t.Fatalf("limits %v", k.limits)
+	}
+}
+
 // fakeKanshi answers `kanshi export --since N --limit M --gzip` from a
 // store holding samples first..last; samples below first were deleted.
 type fakeKanshi struct {
@@ -96,6 +120,7 @@ type fakeKanshi struct {
 	first, last uint64
 	fail        bool
 	requests    []uint64
+	limits      []uint64
 }
 
 func (k *fakeKanshi) Exec(command string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error) {
@@ -107,6 +132,7 @@ func (k *fakeKanshi) Exec(command string, timeout time.Duration, read func(io.Re
 		return ssh.ExecResult{}, fmt.Errorf("unexpected command %q", command)
 	}
 	k.requests = append(k.requests, since)
+	k.limits = append(k.limits, limit)
 
 	var b strings.Builder
 	b.WriteString(`{"type":"header","kanshi":"1.0.0","format":"1.0","store":"` + k.store + `"}` + "\n")

@@ -49,12 +49,14 @@ func (s *Server) handleChart(w http.ResponseWriter, r *http.Request) {
 	}
 	var series []store.SeriesInfo
 	for _, n := range names {
-		parts := strings.SplitN(n, "|", 3)
-		if len(parts) != 3 {
+		// Kinds and metrics are fixed names without '|'; an entity (a
+		// mount point, a container) may hold it.
+		i, j := strings.Index(n, "|"), strings.LastIndex(n, "|")
+		if i < 0 || i == j {
 			writeError(w, http.StatusBadRequest, "want s=kind|entity|metric")
 			return
 		}
-		series = append(series, store.SeriesInfo{Kind: parts[0], Entity: parts[1], Metric: parts[2]})
+		series = append(series, store.SeriesInfo{Kind: n[:i], Entity: n[i+1 : j], Metric: n[j+1:]})
 	}
 	res, err := s.db.Chart(host, series, from, to, maxPoints, s.opts.Tiers, s.now())
 	if err != nil {

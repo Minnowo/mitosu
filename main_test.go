@@ -62,6 +62,16 @@ func TestCheckConfig(t *testing.T) {
 	}
 }
 
+// A --config that does not exist is a mistake (a missed mount, a typo),
+// not a request for the defaults.
+func TestMissingConfigFlagFileIsAnError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.conf")
+	out, err := exec.Command(binary, "check-config", "--config", missing).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), missing) {
+		t.Fatalf("missing --config: %v\n%s", err, out)
+	}
+}
+
 func TestDBFlagOverridesConfig(t *testing.T) {
 	dir := t.TempDir()
 	conf := filepath.Join(dir, "m.conf")

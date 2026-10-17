@@ -561,3 +561,50 @@ Each ends with check.sh green, an independent review, and a commit.
   checks inspect leaves the secret out; it fails with the old command.
   Accepted: a pull's liveness check (up to 15 s) can still delay
   shutdown under the per-host lock.
+- 2026-10-17, M7 (hardening): docs/threat-model.md (assets, actors,
+  entry points with their mitigations, accepted risks),
+  docs/release-notes.md, deploy/Dockerfile (three stages, base images
+  pinned by digest, user mitosu uid 1000, /data volume; built and pulled
+  the test server, database 0600) with a Docker section in
+  docs/running.md. Fuzz targets for ssh_config lines, Resolve and host
+  patterns, known_hosts files, mitosu.conf, and the live-view parsers;
+  scripts/fuzz.sh runs every target (results in docs/measurements.md).
+  Fuzzing found that x/crypto's known_hosts pattern matcher takes
+  exponential time in the number of '*'s (a 10 KB line hung it): the
+  vendored copy now backtracks to the last '*' only, and a trailing '*'
+  matches an empty run as in OpenSSH. kanshi 1.0.1 (exit 1, not a
+  panic, when its reader goes away) is the version e2e and the golden
+  files expect.
+- 2026-10-17, M7 final review (independent subagent, whole system), 14
+  findings. Fixed with tests first: a live view cancelled while its
+  session was opening closed the host's shared connection (pulls and
+  other views with it), and a connection that died under a live view
+  was only replaced at the next pull; now the session is closed when it
+  opens, SSHClient.Closed reports an ended connection without a round
+  trip and the scheduler replaces it on the next use, and a live command
+  that hit its deadline has the connection checked in the background
+  (never under the per-host lock; a cut-off read is not a reason).
+  A pull holds at most 64 MiB of sample lines per page and asks again
+  for as many samples as fitted when a page is over (before: up to
+  2000 x 1 MiB per host). `mitosu stat` replaces control characters
+  and invalid UTF-8 in server output (a hostname could carry terminal
+  escapes; \r, \v and \f become spaces). Chart series names split at
+  the first and last '|' (a mount point may hold one). Docker logs over
+  the output cap keep their end (the newest lines and docker's exit
+  line; the oldest are reached with "older"), as the journal does; they
+  used to fail with "ended without its exit status". A
+  `--config` that does not exist is an error (a missed Docker mount
+  silently gave the defaults). Without tests: the UI falls back to the
+  overview on a malformed hash (checked in a browser); an existing
+  database others can read is logged as a warning; scripts/fuzz.sh uses
+  mktemp and fails with no targets. Documented as accepted risks: the
+  session cookie reaches every port on the same host name (RFC 6265
+  cookies ignore ports), the login limit is per address with no global
+  bound, live views need a POSIX login shell. A second review of these
+  fixes (subagent) found the first versions kept the oldest log lines
+  and could hide a docker failure, checked liveness under the lock after
+  any cut-off read, and halved --limit step by step; reworked as above.
+  Threat model and running notes corrected where they claimed more than the code does (quoting,
+  file modes, the Dockerfile's npm build, files read).
+- Waiting for the user: a week of `mitosu serve` against OVH_4gb with
+  kanshi 1.0.1 deployed, then the UI feedback pass.

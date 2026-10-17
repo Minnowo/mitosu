@@ -54,10 +54,16 @@ func CmdCheckConfig(ctx context.Context, c *cli.Command) error {
 }
 
 // loadConfig loads --config, or the default path, and applies --db (when
-// the command has it and it is given), which overrides the file's db.
+// the command has it and it is given), which overrides the file's db. A
+// missing default file gives the defaults; a missing --config file is an
+// error.
 func loadConfig(c *cli.Command) (string, config.Config, error) {
 	path := c.String("config")
-	if path == "" {
+	if path != "" {
+		if _, err := os.Stat(path); err != nil {
+			return path, config.Config{}, fmt.Errorf("--config: %w", err)
+		}
+	} else {
 		p, err := config.DefaultPath()
 		if err != nil {
 			return "", config.Config{}, err

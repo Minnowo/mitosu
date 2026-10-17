@@ -71,7 +71,7 @@ func systemScript(o Options) string {
 
 // SystemView reads the system facts of host.
 func SystemView(ctx context.Context, r Runner, o Options, host string) (System, error) {
-	out, err := run(ctx, r, host, "sh", systemScript(o))
+	out, err := run(ctx, r, host, "sh", systemScript(o), false)
 	if err != nil {
 		return System{}, err
 	}

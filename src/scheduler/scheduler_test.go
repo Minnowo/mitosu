@@ -183,6 +183,51 @@ func TestExecSharesTheConnection(t *testing.T) {
 	}
 }
 
+// A connection that died under a live view is replaced for the next one,
+// not only at the next pull (which may be hours away).
+func TestExecReplacesADeadConnection(t *testing.T) {
+	f := newFake()
+	s := f.scheduler(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	waitFor(t, func() bool { return f.pulls.Load() == 1 })
+	f.dead.Store(true)
+	if res, _ := s.Exec(ctx, "web", "docker logs", time.Second, nil); res.Status != -1 {
+		t.Fatalf("on a dead connection: %+v", res)
+	}
+	if res, err := s.Exec(ctx, "web", "docker logs", time.Second, nil); err != nil || res.Status != 0 {
+		t.Fatalf("after: %+v %v", res, err)
+	}
+	cancel()
+	<-done
+	if f.connects.Load() != 2 {
+		t.Fatalf("connected %d times, want a new connection after the dead one", f.connects.Load())
+	}
+}
+
+// A live command that ended without an exit status on a working
+// connection (its output was cut off) neither drops the connection nor
+// checks it under the lock.
+func TestExecKeepsAConnectionAfterACutOffCommand(t *testing.T) {
+	f := newFake()
+	s := f.scheduler(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	waitFor(t, func() bool { return f.pulls.Load() == 1 })
+	alives := f.alives.Load()
+	f.cutOff.Store(true)
+	for i := 0; i < 3; i++ {
+		if res, err := s.Exec(ctx, "web", "docker logs", time.Second, nil); err != nil || res.Status != -1 {
+			t.Fatalf("cut off: %+v %v", res, err)
+		}
+	}
+	cancel()
+	<-done
+	if f.connects.Load() != 1 || f.alives.Load() != alives {
+		t.Fatalf("connects %d, liveness checks %d, want the connection kept unchecked", f.connects.Load(), f.alives.Load()-alives)
+	}
+}
+
 func TestLiveCommandsAreLimitedAndStopWithTheirRequest(t *testing.T) {
 	f := newFake()
 	s := f.scheduler(t, time.Hour)
@@ -230,6 +275,8 @@ type fake struct {
 	execs        atomic.Int32
 	blockExec    atomic.Bool
 	running      atomic.Int32
+	cutOff       atomic.Bool
+	alives       atomic.Int32
 }
 
 func newFake() *fake {
@@ -284,6 +331,14 @@ type fakeConn struct {
 
 func (c *fakeConn) Exec(string, time.Duration, func(io.Reader) error) (ssh.ExecResult, error) {
 	c.f.execs.Add(1)
+	if c.f.dead.Load() {
+		// The connection is lost while the command runs.
+		c.Close()
+		return ssh.ExecResult{Status: -1}, nil
+	}
+	if c.f.cutOff.Load() {
+		return ssh.ExecResult{Status: -1}, nil
+	}
 	return ssh.ExecResult{}, nil
 }
 
@@ -301,11 +356,21 @@ func (c *fakeConn) ExecContext(ctx context.Context, cmd string, timeout time.Dur
 }
 
 func (c *fakeConn) Alive(time.Duration) bool {
+	c.f.alives.Add(1)
 	if c.f.dead.Load() {
 		c.Close()
 		return false
 	}
 	return true
+}
+
+func (c *fakeConn) Closed() bool {
+	select {
+	case <-c.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *fakeConn) Close() error {

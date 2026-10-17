@@ -8,6 +8,10 @@
 //     does, instead of failing the whole database;
 //   - checkAddr ignores @cert-authority lines when comparing a plain host
 //     key, so a host trusted only through a CA is "unknown", not "changed";
+//   - wildcardMatch backtracks to the last '*' only, so a pattern with
+//     many '*'s cannot take exponential time; a '*' now also matches an
+//     empty run at the end ("web*" matches "web"), as OpenSSH's
+//     match_pattern does;
 //   - New is replaced by Open, which returns a DB with the callback, the
 //     key types known for an address (KeyTypes) and the warnings.
 
@@ -86,34 +90,31 @@ func (ps hostPatterns) match(a addr) bool {
 // https://android.googlesource.com/platform/external/openssh/+/ab28f5495c85297e7a597c1ba62e996416da7c7e/addrmatch.c
 // The matching of * has no regard for separators, unlike filesystem globs
 func wildcardMatch(pat []byte, str []byte) bool {
-	for {
-		if len(pat) == 0 {
-			return len(str) == 0
-		}
-		if len(str) == 0 {
-			return false
-		}
-
-		if pat[0] == '*' {
-			if len(pat) == 1 {
-				return true
-			}
-
-			for j := range str {
-				if wildcardMatch(pat[1:], str[j:]) {
-					return true
-				}
-			}
-			return false
-		}
-
-		if pat[0] == '?' || pat[0] == str[0] {
-			pat = pat[1:]
-			str = str[1:]
-		} else {
+	// One backtrack point (the last '*') is enough: O(len(pat)*len(str))
+	// instead of exponential in the number of '*'s.
+	p, i := 0, 0
+	star, mark := -1, 0
+	for i < len(str) {
+		switch {
+		case p < len(pat) && (pat[p] == '?' || pat[p] == str[i]):
+			p++
+			i++
+		case p < len(pat) && pat[p] == '*':
+			star = p
+			mark = i
+			p++
+		case star >= 0:
+			p = star + 1
+			mark++
+			i = mark
+		default:
 			return false
 		}
 	}
+	for p < len(pat) && pat[p] == '*' {
+		p++
+	}
+	return p == len(pat)
 }
 
 func (p *hostPattern) match(a addr) bool {

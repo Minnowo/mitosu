@@ -44,6 +44,9 @@ container or a gap over 15 minutes. Gaps, lost samples, reboots and
 container changes are recorded as events. A failed or interrupted pull
 keeps what it stored and the next one continues from there.
 
+What changed on this branch: [docs/release-notes.md](docs/release-notes.md).
+What mitosu protects and how: [docs/threat-model.md](docs/threat-model.md).
+
 ## Server mode
 
 `mitosu serve` pulls every server listed in `~/.config/mitosu/mitosu.conf`
@@ -67,7 +70,10 @@ and the commented [deploy/mitosu.conf](deploy/mitosu.conf);
 `mitosu check-config` shows the settings in effect.
 
 mitosu writes only the database and the password file next to it, and
-reads only the config file. To keep them anywhere you like:
+reads the config file, your SSH files (~/.ssh/config, keys,
+known_hosts) and, with TLS, the certificate and key. To keep its own
+files anywhere you like (a `--config` file must exist; without
+`--config` a missing default file means the defaults):
 
 ```
 mitosu serve --config /srv/mitosu/mitosu.conf --db /srv/mitosu/history.db

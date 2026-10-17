@@ -93,7 +93,7 @@ func Journal(ctx context.Context, r Runner, o Options, host string, q JournalQue
 	for _, m := range q.match {
 		cmd += " " + quote(m)
 	}
-	out, err := run(ctx, r, host, "journalctl", cmd)
+	out, err := run(ctx, r, host, "journalctl", cmd, false)
 	if err != nil {
 		return JournalResult{}, err
 	}

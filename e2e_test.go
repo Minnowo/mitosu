@@ -126,7 +126,7 @@ func TestE2EKanshiVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kanshi version: %v\n%s", err, stderr)
 	}
-	if out != "kanshi 1.0.0, protocol 1.0\n" {
+	if out != "kanshi 1.0.1, protocol 1.0\n" {
 		t.Fatalf("output %q", out)
 	}
 }

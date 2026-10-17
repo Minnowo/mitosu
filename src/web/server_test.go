@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -278,6 +279,11 @@ func TestEndpoints(t *testing.T) {
 	if len(chart.Series) != 1 || len(chart.Times) != 2 || chart.Values[0][1] == nil || *chart.Values[0][1] != 2000*1024 {
 		t.Fatalf("chart %+v", chart)
 	}
+	// A mount point may hold '|', the separator.
+	decode(t, serve(h, apiRequest("GET", "/api/chart?host=web&s="+url.QueryEscape("fs|/mnt/a|b|size_bytes")+"&from=0&to=60000", "")), &chart)
+	if len(chart.Series) != 1 || chart.Series[0].Entity != "/mnt/a|b" || len(chart.Times) != 2 {
+		t.Fatalf("chart of /mnt/a|b %+v", chart)
+	}
 	if got := serve(h, apiRequest("GET", "/api/chart?host=web&s=bad&from=0&to=60000", "")).Code; got != http.StatusBadRequest {
 		t.Fatalf("bad series name: %d", got)
 	}
@@ -360,6 +366,7 @@ func newTestServer(t *testing.T, login bool) *Server {
 	page := store.Page{Header: kanshi.Header{Kanshi: "1.0.0", Format: "1.0", Store: "0123456789abcdef0123456789abcdef"}, End: kanshi.End{Next: 2}}
 	for i, ts := range []uint64{10_000, 20_000} {
 		line := []byte(`{"type":"sample","seq":` + strconv.Itoa(i+1) + `,"time_ms":` + strconv.FormatUint(ts, 10) + `,"mem":{"total_kib":8000,"free_kib":5000,"available_kib":6000,"buffers_kib":0,"cached_kib":0,"swap_total_kib":0,"swap_free_kib":0},` +
+			`"fs":[{"mount":"/mnt/a|b","source":"/dev/vdb","type":"ext4","size_bytes":1000,"free_bytes":400,"avail_bytes":300,"inodes":10,"inodes_free":5}],` +
 			`"containers":[{"name":"blog-web-1","id":"` + strings.Repeat("a", 64) + `","image":"nginx","state":"running","restarts":0,"started_at_ms":1,"finished_at_ms":0,"exit_code":0,"oom_killed":false}],"errors":[]}`)
 		var s kanshi.Sample
 		if err := json.Unmarshal(line, &s); err != nil {

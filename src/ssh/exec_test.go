@@ -141,6 +141,47 @@ func TestExecTimeoutWhileOpeningTheSession(t *testing.T) {
 	}
 }
 
+// A browser that goes away while its session is being opened must not
+// take the shared connection (pulls, other live views) down with it.
+func TestExecContextCancelWhileOpeningKeepsTheConnection(t *testing.T) {
+	host := newKey(t)
+	user := newKey(t)
+	srv := startServer(t, []gossh.Signer{host.signer}, []gossh.PublicKey{user.pub}, nil, true)
+	c := testClient(srv, knownHostFor(t, srv, host), []string{user.file(t, "")}, SSHPasswords{})
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	start := time.Now()
+	res, err := c.ExecContext(ctx, "never runs", time.Hour, func(r io.Reader) error { return nil })
+	if err == nil || res.Status != -1 {
+		t.Fatalf("result %+v err %v, want an error", res, err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("returned after %v", elapsed)
+	}
+	if !c.Alive(5 * time.Second) {
+		t.Fatal("the connection was closed")
+	}
+}
+
+func TestClosedAfterTheConnectionEnds(t *testing.T) {
+	c := execClient(t, func(cmd string, stdout, stderr io.Writer) (uint32, string) { return 0, "" })
+	if c.Closed() {
+		t.Fatal("closed right after connecting")
+	}
+	c.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for !c.Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("not closed 5 s after Close")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // execClient connects to a new in-process server running exec.
 func execClient(t *testing.T, exec execHandler) *SSHClient {
 	t.Helper()

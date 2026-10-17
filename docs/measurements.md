@@ -44,3 +44,28 @@ rollups, samples, events), so about 27 MB per day while every tier is
 still filling. The estimate above (24 MB raw + 8 MB of 1-minute buckets,
 32 MB per day) was slightly high; the steady-state sizes above are
 therefore upper bounds.
+
+## M7 fuzzing (2026-10-17, dev machine)
+
+scripts/fuzz.sh, 5 minutes per target at nice 19 with
+`-fuzzminimizetime 0` (minimizing large inputs otherwise stalls a run).
+
+| Target                          | Executions | Result                         |
+|---------------------------------|------------|--------------------------------|
+| kanshi FuzzReadExport           | 17.1 M     | no failure                     |
+| ssh FuzzSplitConfigLine         | 19.3 M     | no failure                     |
+| ssh FuzzResolve                 | 7.2 M      | no failure                     |
+| ssh FuzzWildcardMatch           | 20.7 M     | no failure                     |
+| knownhosts FuzzOpen             | 10.7 M     | hang found, fixed, then clean  |
+| config FuzzParse                | 8.7 M      | no failure                     |
+| live FuzzJournal                | 18.4 M     | no failure                     |
+| live FuzzLogs                   | 19.9 M     | no failure                     |
+| live FuzzLineParsers            | 19.4 M     | no failure                     |
+| live FuzzSystemAndInspect       | 19.6 M     | no failure                     |
+
+The FuzzOpen hang: x/crypto's known_hosts pattern matcher recursed once
+per '*', so a 10 KB host pattern with about a thousand '*'s ran for
+minutes (exponential). The vendored copy now backtracks to the last '*'
+only (O(pattern x name)); the input is kept in
+src/knownhosts/testdata/fuzz/FuzzOpen/ and runs with every `go test`.
+The count above is the run after the fix.

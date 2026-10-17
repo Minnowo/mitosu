@@ -247,7 +247,7 @@ func connectionFlags() []cli.Flag {
 func configFlag() cli.Flag {
 	return &cli.StringFlag{
 		Name:  "config",
-		Usage: "The config file. Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf.",
+		Usage: "The config file (must exist). Default: $XDG_CONFIG_HOME/mitosu/mitosu.conf, else ~/.config/mitosu/mitosu.conf (defaults if missing).",
 	}
 }
 

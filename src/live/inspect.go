@@ -94,7 +94,7 @@ func Inspect(ctx context.Context, r Runner, o Options, host, container string) (
 	if err := checkContainer(container); err != nil {
 		return ContainerInfo{}, err
 	}
-	out, err := run(ctx, r, host, "docker", o.sudo()+"docker inspect --type container -- "+quote(container))
+	out, err := run(ctx, r, host, "docker", o.sudo()+"docker inspect --type container -- "+quote(container), false)
 	if err != nil {
 		return ContainerInfo{}, err
 	}

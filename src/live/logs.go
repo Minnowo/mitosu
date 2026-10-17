@@ -66,7 +66,7 @@ func Logs(ctx context.Context, r Runner, o Options, host, container string, line
 		docker += " --tail " + strconv.Itoa(lines)
 	}
 	cmd := "{ " + docker + " -- " + quote(container) + " 2>&1; echo \"" + exitMarker + "$?\"; } | tail -n " + strconv.Itoa(lines+1)
-	out, err := run(ctx, r, host, "docker", cmd)
+	out, err := run(ctx, r, host, "docker", cmd, true)
 	if err != nil {
 		return LogsResult{}, err
 	}
@@ -92,7 +92,7 @@ func Logs(ctx context.Context, r Runner, o Options, host, container string, line
 	if status != 0 {
 		return LogsResult{}, dockerError(status, strings.Join(other, "\n"))
 	}
-	if len(res.Lines) == lines && len(res.Lines) > 0 {
+	if (len(res.Lines) == lines || out.truncated) && len(res.Lines) > 0 {
 		res.Older = res.Lines[0].TS
 	}
 	return res, nil
