@@ -22,6 +22,23 @@ Only `--config` (read), the database and the `password` file next to it
 ~/.local/share/mitosu/mitosu.db; `--config` and `--db` put them
 anywhere. The database's directory is created 0700, the files 0600.
 
+## Live views and permissions
+
+The live views (container logs and configuration, journal, SSH logins,
+sudo uses, system facts, pending updates, failed units) run fixed
+commands over the same SSH login, only when opened, and nothing they
+show is stored. What the login needs:
+
+| View                         | Needs                                               |
+|------------------------------|-----------------------------------------------------|
+| Container logs, configuration | group `docker` (or `live_sudo = on`)               |
+| Journal, logins, sudo         | group `adm` or `systemd-journal` (or `live_sudo = on`); otherwise only the login's own entries, and the page says so |
+| System                       | nothing special (Docker version needs `docker`)     |
+
+`live_sudo = on` runs `docker` and `journalctl` through `sudo -n`, so
+the login needs passwordless sudo for them. Note that group `docker` is
+root-equivalent on the server. `live_views = off` hides all of them.
+
 ## From a shell
 
 ```

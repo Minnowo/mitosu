@@ -191,6 +191,12 @@ type ExecResult struct {
 // (later calls on this client fail). The error is only for a session that
 // could not be started.
 func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Reader) error) (ExecResult, error) {
+	return s.ExecContext(context.Background(), command, timeout, read)
+}
+
+// ExecContext is Exec that also stops the command, as at its deadline,
+// when ctx is done (for example the browser that asked went away).
+func (s *SSHClient) ExecContext(ctx context.Context, command string, timeout time.Duration, read func(io.Reader) error) (ExecResult, error) {
 	log.Debug().Str("command", command).Msg("Running command")
 
 	// The deadline covers opening the session too: a server can leave a
@@ -204,6 +210,7 @@ func (s *SSHClient) Exec(command string, timeout time.Duration, read func(io.Rea
 		select {
 		case <-done:
 			return
+		case <-ctx.Done():
 		case <-time.After(timeout):
 		}
 		timedOut.Store(true)

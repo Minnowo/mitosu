@@ -11,12 +11,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// handleSession answers {"login": login is required, "logged_in": bool}.
+// handleSession answers {"login": login is required, "logged_in": bool,
+// "live_views": the live views are on}.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	required := s.sessions != nil
 	writeJSON(w, http.StatusOK, map[string]bool{
-		"login":     required,
-		"logged_in": !required || s.sessions.valid(r),
+		"login":      required,
+		"logged_in":  !required || s.sessions.valid(r),
+		"live_views": s.opts.LiveViews && s.opts.Live != nil,
 	})
 }
 

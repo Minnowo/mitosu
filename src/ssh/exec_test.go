@@ -4,6 +4,7 @@
 package ssh
 
 import (
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -77,6 +78,28 @@ func TestExecTimeout(t *testing.T) {
 	}
 	if !res.TimedOut || res.Status != -1 {
 		t.Fatalf("result %+v, want a timeout", res)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("returned after %v", elapsed)
+	}
+}
+
+func TestExecContextCancel(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	c := execClient(t, func(cmd string, stdout, stderr io.Writer) (uint32, string) {
+		<-release
+		return 0, ""
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	start := time.Now()
+	res, err := c.ExecContext(ctx, "hangs", time.Hour, func(r io.Reader) error {
+		_, err := io.ReadAll(r)
+		return err
+	})
+	if err != nil || res.Status != -1 {
+		t.Fatalf("result %+v err %v", res, err)
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
 		t.Fatalf("returned after %v", elapsed)

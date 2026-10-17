@@ -7,12 +7,14 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"mitosu/src/pull"
+	"mitosu/src/ssh"
 	"mitosu/src/store"
 )
 
@@ -21,6 +23,11 @@ const (
 	// further failure up to the pull interval.
 	firstRetry = 30 * time.Second
 
+	// maxLive caps the live commands running at once on one host, so
+	// they cannot use up the server's sessions (sshd MaxSessions is 10)
+	// and starve the pulls.
+	maxLive = 2
+
 	// aliveTimeout bounds the check of a kept connection before a pull.
 	aliveTimeout = 15 * time.Second
 )
@@ -28,6 +35,8 @@ const (
 // Conn is an open connection to a host; *ssh.SSHClient is one.
 type Conn interface {
 	pull.Runner
+	// ExecContext is Exec that stops when ctx is done.
+	ExecContext(ctx context.Context, command string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error)
 	// Alive reports whether the connection still answers; a dead one is
 	// closed.
 	Alive(timeout time.Duration) bool
@@ -72,20 +81,37 @@ type Scheduler struct {
 	mu      sync.Mutex
 	status  map[string]*HostStatus
 	trigger map[string]chan struct{}
+	conns   map[string]*hostConn
 	hosts   []string
 }
+
+// hostConn is one host's kept connection, shared by its pulls and the
+// live views. mu is held while the connection is checked or opened.
+type hostConn struct {
+	mu     sync.Mutex
+	client Conn
+	// live holds a token for each live command running.
+	live chan struct{}
+	// running is the context of Run while it runs, nil otherwise.
+	running context.Context
+}
+
+// ErrNotRunning is returned by Exec while Run is not running (serve is
+// starting or stopping).
+var ErrNotRunning = errors.New("serve is starting or stopping")
 
 // New returns a scheduler for hosts, pulling each every interval into db
 // with tiers.
 func New(db *store.DB, hosts []string, tiers []store.Tier, interval time.Duration, connect Connector, pullFn Puller) *Scheduler {
 	s := &Scheduler{
 		db: db, tiers: tiers, interval: interval, connect: connect, pullFn: pullFn, now: time.Now, firstRetry: firstRetry,
-		status: map[string]*HostStatus{}, trigger: map[string]chan struct{}{},
+		status: map[string]*HostStatus{}, trigger: map[string]chan struct{}{}, conns: map[string]*hostConn{},
 		hosts: append([]string(nil), hosts...),
 	}
 	for _, h := range hosts {
 		s.status[h] = &HostStatus{Host: h}
 		s.trigger[h] = make(chan struct{}, 1)
+		s.conns[h] = &hostConn{live: make(chan struct{}, maxLive)}
 	}
 	return s
 }
@@ -133,19 +159,47 @@ func (s *Scheduler) PullNow(host string) error {
 	return nil
 }
 
+// Exec runs command on host over its kept connection (opening one if
+// there is none), like ssh.SSHClient.ExecContext, for the live views: at
+// most maxLive at once per host (others wait, until ctx is done), and
+// without the liveness check pulls make, which may take seconds on a busy
+// link. It returns ErrUnknownHost for a host not in the config and
+// ErrNotRunning while Run is not running.
+func (s *Scheduler) Exec(ctx context.Context, host, command string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error) {
+	hc, ok := s.conns[host]
+	if !ok {
+		return ssh.ExecResult{}, ErrUnknownHost
+	}
+	select {
+	case hc.live <- struct{}{}:
+	case <-ctx.Done():
+		return ssh.ExecResult{}, ctx.Err()
+	}
+	defer func() { <-hc.live }()
+	c, err := s.conn(ctx, host, hc, false)
+	if err != nil {
+		return ssh.ExecResult{}, err
+	}
+	return c.ExecContext(ctx, command, timeout, read)
+}
+
 // runHost is one host's loop.
 func (s *Scheduler) runHost(ctx context.Context, host string) {
-	var client Conn
-	var clientMu sync.Mutex
+	hc := s.conns[host]
+	hc.mu.Lock()
+	hc.running = ctx
+	hc.mu.Unlock()
 	closeClient := func() {
-		clientMu.Lock()
-		defer clientMu.Unlock()
-		if client != nil {
-			client.Close()
-			client = nil
+		hc.mu.Lock()
+		defer hc.mu.Unlock()
+		if hc.client != nil {
+			hc.client.Close()
+			hc.client = nil
 		}
+		hc.running = nil
 	}
-	// Closing the connection when ctx ends stops a running pull.
+	// Closing the connection when ctx ends stops a running pull and any
+	// live view.
 	stop := context.AfterFunc(ctx, closeClient)
 	defer stop()
 	defer closeClient()
@@ -162,7 +216,11 @@ func (s *Scheduler) runHost(ctx context.Context, host string) {
 			st.Pulling = true
 			st.LastAttempt = s.now()
 		})
-		res, err := s.pullOnce(ctx, host, &client, &clientMu)
+		var res pull.Result
+		c, err := s.conn(ctx, host, hc, true)
+		if err == nil {
+			res, err = s.pullFn(c, s.db, host, s.tiers, s.now)
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -170,11 +228,11 @@ func (s *Scheduler) runHost(ctx context.Context, host string) {
 		if err != nil {
 			// Keep a connection that still answers: the error may be the
 			// database's or kanshi's, not the link's.
-			clientMu.Lock()
-			if client != nil && !client.Alive(aliveTimeout) {
-				client = nil
+			hc.mu.Lock()
+			if hc.client != nil && !hc.client.Alive(aliveTimeout) {
+				hc.client = nil
 			}
-			clientMu.Unlock()
+			hc.mu.Unlock()
 			failures++
 			wait = retryWait(failures, s.firstRetry, s.interval)
 			log.Warn().Err(err).Str("host", host).Dur("retry_in", wait).Msg("Pull failed")
@@ -214,31 +272,35 @@ func (s *Scheduler) runHost(ctx context.Context, host string) {
 	}
 }
 
-// pullOnce makes sure a live connection exists and pulls once.
-func (s *Scheduler) pullOnce(ctx context.Context, host string, client *Conn, mu *sync.Mutex) (pull.Result, error) {
-	mu.Lock()
-	c := *client
-	mu.Unlock()
-	if c != nil && !c.Alive(aliveTimeout) {
+// conn returns host's connection: the kept one (with check, only if it
+// still answers), else a new one (connecting gives up when ctx or Run's
+// context ends).
+func (s *Scheduler) conn(ctx context.Context, host string, hc *hostConn, check bool) (Conn, error) {
+	hc.mu.Lock()
+	defer hc.mu.Unlock()
+	if hc.running == nil {
+		return nil, ErrNotRunning
+	}
+	if check && hc.client != nil && !hc.client.Alive(aliveTimeout) {
 		log.Info().Str("host", host).Msg("Connection lost; reconnecting")
-		c = nil
+		hc.client = nil
 	}
-	if c == nil {
-		nc, err := s.connect(ctx, host)
+	if hc.client == nil {
+		cctx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(hc.running, cancel)
+		nc, err := s.connect(cctx, host)
+		stop()
+		cancel()
 		if err != nil {
-			return pull.Result{}, err
+			return nil, err
 		}
-		mu.Lock()
-		if ctx.Err() != nil {
-			mu.Unlock()
+		if hc.running.Err() != nil {
 			nc.Close()
-			return pull.Result{}, ctx.Err()
+			return nil, hc.running.Err()
 		}
-		*client = nc
-		mu.Unlock()
-		c = nc
+		hc.client = nc
 	}
-	return s.pullFn(c, s.db, host, s.tiers, s.now)
+	return hc.client, nil
 }
 
 func (s *Scheduler) setStatus(host string, change func(*HostStatus)) {

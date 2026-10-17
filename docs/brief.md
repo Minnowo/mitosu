@@ -506,3 +506,58 @@ Each ends with check.sh green, an independent review, and a commit.
   scripts/approved-npm.txt and registry-only locked packages. Not done
   by a test: the UI's request loop and ordering (no JS test runner is
   approved), checked by counting requests in headless Firefox.
+- 2026-10-17, M6 (live views). src/live runs fixed commands over the
+  host's kept connection (the scheduler now holds each host's connection,
+  shared by pulls and live views, checked under one lock per host):
+  docker logs --timestamps --tail N [--until] for a container the
+  samples named; docker inspect, decoding only listed fields (Env, Cmd,
+  Args and other labels than Compose's are never read; tested with a
+  planted secret); journalctl -o json with --output-fields, unit and
+  priority filters and --until for paging; SSH logins (sshd and
+  sshd-session lines: accepted, failed, invalid user) and sudo / sudo-rs
+  uses parsed from the journal; one script for OS, kernel, CPU, uptime,
+  Docker version, apt list --upgradable (never apt update),
+  /var/run/reboot-required and systemctl --failed. Only validated
+  container and unit names (single-quoted) and numbers go into commands;
+  output is capped at 4 MiB and 2000 lines; each command has 20 s (the
+  connection may first have to be opened). Failures are explained:
+  tool missing (also as sudo reports it, exit 1), Docker permission,
+  sudo wanting a password, timeouts; error text printed on stdout is
+  used too. journalctl prints no partial-access hint in JSON mode, so
+  partial access is derived from the login's uid and groups (root,
+  systemd-journal, adm or wheel see all; journalctl(1)). Config:
+  live_views (default on), live_sudo (default off; sudo -n for docker and
+  journalctl). API /api/live/{logs,inspect,journal,logins,sudo,system},
+  behind the login. UI: a view row on the host page; container names
+  link to their configuration and logs. e2e against the test server: the
+  journal partial without sudo and complete with live_sudo, system facts,
+  SSH logins, mitosu's own sudo use, and "docker is not installed" with
+  and without sudo (the test server has no docker CLI, so container logs
+  and inspect are tested with fixtures only).
+- 2026-10-17, M6 review (independent subagent), 14 findings, all
+  addressed; no injection found. docker logs applies --tail before
+  --until, so older pages were always empty: the last lines before a
+  line's exact timestamp are now taken by tail on the server, with
+  docker's exit status on a marker line; lines without docker's
+  timestamp (docker's or sudo's own messages, a stderr warning) are never
+  shown as log lines and only explain failures, and container output
+  never reaches an error message or mitosu's log. Failures of other
+  commands are explained from stderr only, and only when they failed (a
+  config-file warning on a successful run had read as "no Docker
+  access"). Journal pages use journal cursors with -r (newest first, so
+  a size cap drops the oldest) and --all (long fields are null
+  otherwise); fields may be strings, byte arrays or arrays of strings;
+  logins and sudo page by the last journal line read, not the last
+  parsed one. SSH login lines take the address from the last
+  " from <addr> port <n>", so a user name cannot fake it; sudo's
+  "(command continued)" lines join their command; sudo-rs's refusal is
+  recognised; a shell greeting before docker inspect is explained. Live
+  commands stop when their request ends (ExecContext), run at most 2 at
+  once per host, and skip the liveness check pulls make. The UI pages by
+  the returned cursor, drops superseded answers, shows cut-off answers,
+  and hides the view tabs when live_views is off (/api/session says so).
+  A real-Docker test (TestE2ELocalDocker: a throwaway local container
+  with 500 lines and a planted SECRET) pages through every line and
+  checks inspect leaves the secret out; it fails with the old command.
+  Accepted: a pull's liveness check (up to 15 s) can still delay
+  shutdown under the per-host lock.

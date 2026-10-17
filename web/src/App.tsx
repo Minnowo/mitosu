@@ -14,6 +14,7 @@ export function App() {
     const route = useRoute();
     const [session, setSession] = useState<SessionState>('checking');
     const [loginNeeded, setLoginNeeded] = useState(false);
+    const [liveViews, setLiveViews] = useState(false);
     const [error, setError] = useState('');
     const [logoutError, setLogoutError] = useState('');
 
@@ -21,6 +22,7 @@ export function App() {
         api.session().then(
             (s) => {
                 setLoginNeeded(s.login);
+                setLiveViews(s.live_views);
                 setSession(s.logged_in ? 'in' : 'login');
             },
             (e: unknown) => {
@@ -61,7 +63,14 @@ export function App() {
                 )}
             </header>
             {route.page === 'host' ? (
-                <HostPage host={route.host} range={route.params.get('range') ?? '24h'} onLoggedOut={loggedOut} />
+                <HostPage
+                    host={route.host}
+                    range={route.params.get('range') ?? '24h'}
+                    view={route.params.get('view') ?? 'charts'}
+                    container={route.params.get('container') ?? ''}
+                    liveViews={liveViews}
+                    onLoggedOut={loggedOut}
+                />
             ) : (
                 <Overview onLoggedOut={loggedOut} />
             )}

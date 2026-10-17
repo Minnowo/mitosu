@@ -161,6 +161,61 @@ func TestBadPullKeepsALiveConnection(t *testing.T) {
 	}
 }
 
+func TestExecSharesTheConnection(t *testing.T) {
+	f := newFake()
+	s := f.scheduler(t, time.Hour)
+	if _, err := s.Exec(context.Background(), "web", "true", time.Second, nil); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("before Run: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	waitFor(t, func() bool { return f.pulls.Load() == 1 })
+	if _, err := s.Exec(ctx, "web", "docker logs", time.Second, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Exec(ctx, "nope", "true", time.Second, nil); !errors.Is(err, ErrUnknownHost) {
+		t.Fatalf("unknown host: %v", err)
+	}
+	cancel()
+	<-done
+	if f.connects.Load() != 1 || f.execs.Load() != 1 {
+		t.Fatalf("connects %d execs %d, want the pull's connection reused", f.connects.Load(), f.execs.Load())
+	}
+}
+
+func TestLiveCommandsAreLimitedAndStopWithTheirRequest(t *testing.T) {
+	f := newFake()
+	s := f.scheduler(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := run(ctx, s)
+	waitFor(t, func() bool { return f.pulls.Load() == 1 })
+	f.blockExec.Store(true)
+	reqCtx, stopReqs := context.WithCancel(ctx)
+	results := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		go func() {
+			_, err := s.Exec(reqCtx, "web", "journalctl", time.Hour, nil)
+			results <- err
+		}()
+	}
+	waitFor(t, func() bool { return f.running.Load() == maxLive })
+	time.Sleep(20 * time.Millisecond)
+	if n := f.running.Load(); n != maxLive {
+		t.Fatalf("%d live commands running at once, want at most %d", n, maxLive)
+	}
+	// The browser went away: running commands stop, waiting ones give up.
+	stopReqs()
+	for i := 0; i < 4; i++ {
+		select {
+		case <-results:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a live command did not stop with its request")
+		}
+	}
+	cancel()
+	<-done
+}
+
 // fake is a host whose connection and pulls the test controls.
 type fake struct {
 	db           *store.DB
@@ -172,6 +227,9 @@ type fake struct {
 	blocked      atomic.Bool
 	hangConnect  atomic.Bool
 	failPulls    atomic.Int32
+	execs        atomic.Int32
+	blockExec    atomic.Bool
+	running      atomic.Int32
 }
 
 func newFake() *fake {
@@ -225,7 +283,21 @@ type fakeConn struct {
 }
 
 func (c *fakeConn) Exec(string, time.Duration, func(io.Reader) error) (ssh.ExecResult, error) {
-	return ssh.ExecResult{}, errors.New("not used")
+	c.f.execs.Add(1)
+	return ssh.ExecResult{}, nil
+}
+
+func (c *fakeConn) ExecContext(ctx context.Context, cmd string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error) {
+	if c.f.blockExec.Load() {
+		c.f.running.Add(1)
+		defer c.f.running.Add(-1)
+		select {
+		case <-ctx.Done():
+		case <-c.closed:
+		}
+		return ssh.ExecResult{Status: -1}, nil
+	}
+	return c.Exec(cmd, timeout, read)
 }
 
 func (c *fakeConn) Alive(time.Duration) bool {

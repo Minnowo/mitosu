@@ -37,11 +37,16 @@ type Config struct {
 	Login bool
 	// TLSCert and TLSKey are PEM files; both set means HTTPS.
 	TLSCert, TLSKey string
+	// LiveViews turns the live views (logs, journal, logins, sudo,
+	// system, container configuration) on.
+	LiveViews bool
+	// LiveSudo runs docker and journalctl in live views through sudo -n.
+	LiveSudo bool
 }
 
 // Default returns the defaults: no hosts, pulls every 5 minutes,
 // store.DefaultPath, store.DefaultTiers, 127.0.0.1:7878, login on,
-// plain HTTP.
+// plain HTTP, live views on without sudo.
 func Default() (Config, error) {
 	db, err := store.DefaultPath()
 	if err != nil {
@@ -53,6 +58,7 @@ func Default() (Config, error) {
 		Tiers:        append([]store.Tier(nil), store.DefaultTiers...),
 		Listen:       "127.0.0.1:7878",
 		Login:        true,
+		LiveViews:    true,
 	}, nil
 }
 

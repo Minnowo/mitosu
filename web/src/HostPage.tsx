@@ -5,6 +5,7 @@ import {useMemo, useState} from 'preact/hooks';
 import {api, type Container, type HostEvent, type Series} from './api';
 import {Chart} from './Chart';
 import {bytes, dateTime, num, pct, rate} from './format';
+import {LiveInspect, LiveJournal, LiveLogins, LiveLogs, LiveSudo, LiveSystem} from './Live';
 import {status} from './Overview';
 import {Problems} from './Problems';
 import {hostHref} from './route';
@@ -36,11 +37,79 @@ interface ChartDef {
     range?: [number, number];
 }
 
-export function HostPage(props: {host: string; range: string; onLoggedOut: () => void}) {
+const views: [string, string][] = [
+    ['charts', 'Charts'],
+    ['logs', 'Logs'],
+    ['journal', 'Journal'],
+    ['logins', 'Logins'],
+    ['sudo', 'sudo'],
+    ['system', 'System'],
+];
+
+export function HostPage(props: {host: string; range: string; view: string; container: string; liveViews: boolean; onLoggedOut: () => void}) {
+    const now = useClock(refreshMs);
+    const hosts = useLoad(() => api.hosts(), [now], props.onLoggedOut);
+    const host = hosts.data?.find((h) => h.name === props.host);
+    const containers = useLoad(() => api.containers(props.host), [props.host, now], props.onLoggedOut);
+
+    if (hosts.data && !host) {
+        return (
+            <main class="flex flex-col gap-4 px-4 pb-4">
+                <h1>{props.host}</h1>
+                <p class="rounded-md p-3 bg-c-error-container text-c-on-error-container">This host is not in the config.</p>
+            </main>
+        );
+    }
+    return (
+        <main class="flex flex-col gap-4 px-4 pb-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h1>{props.host}</h1>
+                    <small>{host ? status(host) : 'Loading...'}</small>
+                </div>
+                <nav class="flex flex-wrap gap-1" aria-label="View">
+                    {views.filter(([name]) => props.liveViews || name === 'charts').map(([name, label]) => (
+                        <a
+                            class={`rounded-sm px-2 ${name === props.view || (name === 'logs' && props.view === 'inspect') ? 'bg-c-secondary text-c-on-secondary' : ''}`}
+                            href={hostHref(props.host, {view: name, range: props.range})}
+                            key={name}
+                        >
+                            {label}
+                        </a>
+                    ))}
+                </nav>
+            </div>
+            {props.view === 'charts' || !props.liveViews ? (
+                <Charts {...props} />
+            ) : (
+                <LiveView {...props} containers={(containers.data ?? []).map((c) => c.name)} />
+            )}
+        </main>
+    );
+}
+
+/** The live view named by props.view. */
+function LiveView(props: {host: string; view: string; container: string; containers: string[]; onLoggedOut: () => void}) {
+    switch (props.view) {
+        case 'logs':
+            return <LiveLogs host={props.host} container={props.container} containers={props.containers} onLoggedOut={props.onLoggedOut} />;
+        case 'inspect':
+            return <LiveInspect host={props.host} container={props.container} onLoggedOut={props.onLoggedOut} />;
+        case 'journal':
+            return <LiveJournal host={props.host} onLoggedOut={props.onLoggedOut} />;
+        case 'logins':
+            return <LiveLogins host={props.host} onLoggedOut={props.onLoggedOut} />;
+        case 'sudo':
+            return <LiveSudo host={props.host} onLoggedOut={props.onLoggedOut} />;
+        case 'system':
+            return <LiveSystem host={props.host} onLoggedOut={props.onLoggedOut} />;
+    }
+    return <small>No such view.</small>;
+}
+
+/** The charts view: problems, range, charts, containers and events. */
+function Charts(props: {host: string; range: string; onLoggedOut: () => void}) {
     const span = ranges.find(([name]) => name === props.range)?.[1] ?? 24 * 3_600_000;
-    // The range ends now, moving once a refresh: a stable value between
-    // refreshes (requests depend on it), and a server that stopped
-    // reporting shows as an empty stretch at the right of each chart.
     const now = useClock(refreshMs);
     const to = now + 1;
     const from = to - span;
@@ -63,25 +132,12 @@ export function HostPage(props: {host: string; range: string; onLoggedOut: () =>
         }
     }
 
-    if (hosts.data && !host) {
-        return (
-            <main class="flex flex-col gap-4 px-4 pb-4">
-                <h1>{props.host}</h1>
-                <p class="rounded-md p-3 bg-c-error-container text-c-on-error-container">This host is not in the config.</p>
-            </main>
-        );
-    }
     return (
-        <main class="flex flex-col gap-4 px-4 pb-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                    <h1>{props.host}</h1>
-                    <small>{host ? status(host) : 'Loading...'}</small>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
+        <>
+            <div class="flex flex-wrap items-center justify-end gap-2">
                     <nav class="flex gap-1" aria-label="Range">
                         {ranges.map(([name]) => (
-                            <a class={`rounded-sm px-2 ${name === props.range ? 'bg-c-primary text-c-on-primary' : ''}`} href={hostHref(props.host, {range: name})} key={name}>
+                            <a class={`rounded-sm px-2 ${name === props.range ? 'bg-c-primary text-c-on-primary' : ''}`} href={hostHref(props.host, {view: 'charts', range: name})} key={name}>
                                 {name}
                             </a>
                         ))}
@@ -89,7 +145,6 @@ export function HostPage(props: {host: string; range: string; onLoggedOut: () =>
                     <button onClick={pullNow} disabled={host?.pulling}>
                         Pull now
                     </button>
-                </div>
             </div>
             {pullMessage && <small>{pullMessage}</small>}
             {loadErrors.length > 0 && <p class="rounded-md p-3 bg-c-error-container text-c-on-error-container">Loading failed: {loadErrors.join('; ')}</p>}
@@ -100,9 +155,9 @@ export function HostPage(props: {host: string; range: string; onLoggedOut: () =>
                     <LoadedChart host={props.host} def={c} from={from} to={to} key={c.title} onLoggedOut={props.onLoggedOut} />
                 ))}
             </div>
-            {containers.data && containers.data.length > 0 && <Containers containers={containers.data} />}
+            {containers.data && containers.data.length > 0 && <Containers host={props.host} containers={containers.data} />}
             <Events events={events.data} />
-        </main>
+        </>
     );
 }
 
@@ -214,7 +269,7 @@ function chartDefs(all: Series[], containers: Container[]): ChartDef[] {
     return defs;
 }
 
-function Containers(props: {containers: Container[]}) {
+function Containers(props: {host: string; containers: Container[]}) {
     return (
         <section class="surface-1 flex flex-col gap-2">
             <h2>Containers</h2>
@@ -233,7 +288,9 @@ function Containers(props: {containers: Container[]}) {
                     <tbody>
                         {props.containers.map((c) => (
                             <tr key={c.name}>
-                                <td>{c.name}</td>
+                                <td>
+                                    <a href={hostHref(props.host, {view: 'inspect', container: c.name})}>{c.name}</a>
+                                </td>
                                 <td>
                                     {c.state}
                                     {c.state === 'exited' ? ` (${c.exit_code})` : ''}

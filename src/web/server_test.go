@@ -19,8 +19,10 @@ import (
 
 	"mitosu/src/auth"
 	"mitosu/src/kanshi"
+	"mitosu/src/live"
 	"mitosu/src/pull"
 	"mitosu/src/scheduler"
+	"mitosu/src/ssh"
 	"mitosu/src/store"
 )
 
@@ -72,6 +74,9 @@ func TestLogin(t *testing.T) {
 	}
 	var session map[string]bool
 	decode(t, serve(h, apiRequest("GET", "/api/session", "")), &session)
+	if !session["live_views"] {
+		t.Fatalf("session says live views are off: %v", session)
+	}
 	if !session["login"] || session["logged_in"] {
 		t.Fatalf("session before login %v", session)
 	}
@@ -103,6 +108,9 @@ func TestLogin(t *testing.T) {
 		{"GET", "/api/hosts"}, {"GET", "/api/series?host=web"},
 		{"GET", "/api/latest?host=web"}, {"GET", "/api/containers?host=web"},
 		{"GET", "/api/chart?host=web&s=host||mem_used_bytes&from=0&to=60000"},
+		{"GET", "/api/live/logs?host=web&container=blog-web-1"}, {"GET", "/api/live/system?host=web"},
+		{"GET", "/api/live/journal?host=web"}, {"GET", "/api/live/logins?host=web"}, {"GET", "/api/live/sudo?host=web"},
+		{"GET", "/api/live/inspect?host=web&container=blog-web-1"},
 		{"GET", "/api/points?host=web&kind=host&metric=mem_used_bytes&from=0&to=60000"},
 		{"GET", "/api/events?host=web&from=0&to=60000"}, {"POST", "/api/pull?host=web"},
 	} {
@@ -290,6 +298,56 @@ func TestEndpoints(t *testing.T) {
 	}
 }
 
+func TestLiveViews(t *testing.T) {
+	s := newTestServer(t, false)
+	h := s.Handler()
+	var logs live.LogsResult
+	decode(t, serve(h, apiRequest("GET", "/api/live/logs?host=web&container=blog-web-1&lines=10", "")), &logs)
+	if len(logs.Lines) != 1 || logs.Lines[0].Text != "hello" {
+		t.Fatalf("logs %+v", logs)
+	}
+	fl := s.opts.Live.(*fakeLive)
+	if len(fl.commands) != 1 || fl.commands[0] != `{ docker logs --timestamps --tail 10 -- 'blog-web-1' 2>&1; echo "@@mitosu-exit:$?"; } | tail -n 11` {
+		t.Fatalf("commands %q", fl.commands)
+	}
+	cases := map[string]int{
+		"/api/live/logs?host=web&container=other":              http.StatusNotFound,
+		"/api/live/logs?host=web&container=blog-web-1&lines=0": http.StatusBadRequest,
+		"/api/live/logs?host=web&container=blog-web-1&lines=x": http.StatusBadRequest,
+		"/api/live/journal?host=web&unit=a%20b":                http.StatusBadRequest,
+		"/api/live/journal?host=nope":                          http.StatusNotFound,
+	}
+	for path, want := range cases {
+		if got := serve(h, apiRequest("GET", path, "")).Code; got != want {
+			t.Errorf("%s: %d, want %d", path, got, want)
+		}
+	}
+	if len(fl.commands) != 1 {
+		t.Fatalf("refused requests ran commands: %q", fl.commands)
+	}
+	fl.status, fl.stderr = 127, "sh: 1: journalctl: not found"
+	w := serve(h, apiRequest("GET", "/api/live/journal?host=web", ""))
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "not installed") {
+		t.Fatalf("failing command: %d %s", w.Code, w.Body.String())
+	}
+	s.opts.LiveViews = false
+	if got := serve(s.Handler(), apiRequest("GET", "/api/live/system?host=web", "")).Code; got != http.StatusNotFound {
+		t.Fatalf("live views off: %d", got)
+	}
+}
+
+// fakeLive answers live commands with fixed output and records them.
+type fakeLive struct {
+	stdout, stderr string
+	status         int
+	commands       []string
+}
+
+func (f *fakeLive) Exec(_ context.Context, host, command string, _ time.Duration, read func(io.Reader) error) (ssh.ExecResult, error) {
+	f.commands = append(f.commands, command)
+	return ssh.ExecResult{Status: f.status, Stderr: f.stderr, ReadErr: read(strings.NewReader(f.stdout))}, nil
+}
+
 // newTestServer returns a server for host "web" holding two samples; with
 // login, the password is `password`.
 func newTestServer(t *testing.T, login bool) *Server {
@@ -301,7 +359,8 @@ func newTestServer(t *testing.T, login bool) *Server {
 	t.Cleanup(func() { db.Close() })
 	page := store.Page{Header: kanshi.Header{Kanshi: "1.0.0", Format: "1.0", Store: "0123456789abcdef0123456789abcdef"}, End: kanshi.End{Next: 2}}
 	for i, ts := range []uint64{10_000, 20_000} {
-		line := []byte(`{"type":"sample","seq":` + strconv.Itoa(i+1) + `,"time_ms":` + strconv.FormatUint(ts, 10) + `,"mem":{"total_kib":8000,"free_kib":5000,"available_kib":6000,"buffers_kib":0,"cached_kib":0,"swap_total_kib":0,"swap_free_kib":0},"errors":[]}`)
+		line := []byte(`{"type":"sample","seq":` + strconv.Itoa(i+1) + `,"time_ms":` + strconv.FormatUint(ts, 10) + `,"mem":{"total_kib":8000,"free_kib":5000,"available_kib":6000,"buffers_kib":0,"cached_kib":0,"swap_total_kib":0,"swap_free_kib":0},` +
+			`"containers":[{"name":"blog-web-1","id":"` + strings.Repeat("a", 64) + `","image":"nginx","state":"running","restarts":0,"started_at_ms":1,"finished_at_ms":0,"exit_code":0,"oom_killed":false}],"errors":[]}`)
 		var s kanshi.Sample
 		if err := json.Unmarshal(line, &s); err != nil {
 			t.Fatal(err)
@@ -316,7 +375,8 @@ func newTestServer(t *testing.T, login bool) *Server {
 		func(pull.Runner, *store.DB, string, []store.Tier, func() time.Time) (pull.Result, error) {
 			return pull.Result{}, nil
 		})
-	opts := Options{Listen: "127.0.0.1:7878", AllowedHosts: []string{"mitosu.lan"}, Tiers: store.DefaultTiers, PullInterval: time.Hour}
+	opts := Options{Listen: "127.0.0.1:7878", AllowedHosts: []string{"mitosu.lan"}, Tiers: store.DefaultTiers, PullInterval: time.Hour,
+		LiveViews: true, Live: &fakeLive{stdout: "2026-10-16T23:50:23Z hello\n@@mitosu-exit:0\n"}}
 	if login {
 		hash, err := auth.Hash(password)
 		if err != nil {

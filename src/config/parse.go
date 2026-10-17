@@ -112,14 +112,18 @@ func Parse(text string) (Config, error) {
 				return Config{}, &LineError{n, fmt.Sprintf("allowed_host %q: want a host name without port", value)}
 			}
 			cfg.AllowedHosts = append(cfg.AllowedHosts, strings.ToLower(strings.TrimSuffix(value, ".")))
-		case "login":
-			switch value {
-			case "on":
-				cfg.Login = true
-			case "off":
-				cfg.Login = false
+		case "login", "live_views", "live_sudo":
+			on, err := onOff(value)
+			if err != nil {
+				return Config{}, &LineError{n, key + ": " + err.Error()}
+			}
+			switch key {
+			case "login":
+				cfg.Login = on
+			case "live_views":
+				cfg.LiveViews = on
 			default:
-				return Config{}, &LineError{n, "login: want on or off"}
+				cfg.LiveSudo = on
 			}
 		case "tls_cert", "tls_key":
 			p, err := absPath(value)
@@ -203,4 +207,15 @@ func checkListen(value string) error {
 		return nil
 	}
 	return fmt.Errorf("listen %q: want an IP address or a host name", value)
+}
+
+// onOff parses on or off.
+func onOff(value string) (bool, error) {
+	switch value {
+	case "on":
+		return true, nil
+	case "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("want on or off")
 }

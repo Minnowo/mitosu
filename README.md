@@ -54,7 +54,15 @@ or failed, no new samples, pulls failing), and per server charts of CPU,
 memory, load, disks, network and containers from the last hour to the
 last year, its containers and its events. Charts end at the current
 time, so a server that stopped reporting shows an empty stretch; gaps in
-its history are drawn as gaps. See [docs/running.md](docs/running.md)
+its history are drawn as gaps.
+
+Live views read from the server when opened, over the same login, and
+are never stored: container logs and configuration (`docker inspect`,
+without environment variables or command lines), the journal, SSH logins
+and sudo uses, OS and hardware facts, upgradable packages (from the
+existing package lists; mitosu never runs `apt update`), whether a
+reboot is required, and failed systemd units. See docs/running.md for
+the groups or `live_sudo` they need. See [docs/running.md](docs/running.md)
 and the commented [deploy/mitosu.conf](deploy/mitosu.conf);
 `mitosu check-config` shows the settings in effect.
 

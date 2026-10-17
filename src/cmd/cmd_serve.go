@@ -16,6 +16,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"mitosu/src/auth"
+	"mitosu/src/live"
 	"mitosu/src/pull"
 	"mitosu/src/scheduler"
 	"mitosu/src/ssh"
@@ -70,6 +71,7 @@ func CmdServe(ctx context.Context, c *cli.Command) error {
 		Listen: cfg.Listen, AllowedHosts: cfg.AllowedHosts, Verifier: verifier,
 		TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey, Tiers: cfg.Tiers,
 		PullInterval: cfg.PullInterval, UI: ui,
+		LiveViews: cfg.LiveViews, Live: sched, LiveOptions: live.Options{Sudo: cfg.LiveSudo},
 	})
 
 	listener, err := server.Listen()

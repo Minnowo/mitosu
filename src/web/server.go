@@ -20,6 +20,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"mitosu/src/auth"
+	"mitosu/src/live"
 	"mitosu/src/scheduler"
 	"mitosu/src/store"
 )
@@ -41,6 +42,11 @@ type Options struct {
 	// UI holds the built web UI (index.html at its root); nil serves
 	// none.
 	UI fs.FS
+	// LiveViews turns /api/live/* on; Live runs their commands (the
+	// scheduler) with LiveOptions.
+	LiveViews   bool
+	Live        live.Runner
+	LiveOptions live.Options
 }
 
 // Server answers the web UI's requests.
@@ -74,6 +80,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/pull", s.loggedIn(s.handlePull))
 	mux.Handle("GET /api/latest", s.loggedIn(s.handleLatest))
 	mux.Handle("GET /api/chart", s.loggedIn(s.handleChart))
+	mux.Handle("GET /api/live/logs", s.loggedIn(s.liveHandler(s.handleLiveLogs)))
+	mux.Handle("GET /api/live/inspect", s.loggedIn(s.liveHandler(s.handleLiveInspect)))
+	mux.Handle("GET /api/live/journal", s.loggedIn(s.liveHandler(s.handleLiveJournal)))
+	mux.Handle("GET /api/live/logins", s.loggedIn(s.liveHandler(s.handleLiveLogins)))
+	mux.Handle("GET /api/live/sudo", s.loggedIn(s.liveHandler(s.handleLiveSudo)))
+	mux.Handle("GET /api/live/system", s.loggedIn(s.liveHandler(s.handleLiveSystem)))
 	mux.Handle("GET /api/containers", s.loggedIn(s.handleContainers))
 	mux.Handle("/", fallback(s.opts.UI))
 

@@ -27,6 +27,8 @@ allowed_host = mitosu.lan
 login = off
 tls_cert = /etc/mitosu/cert.pem
 tls_key = /etc/mitosu/key.pem
+live_views = off
+live_sudo = on
 `
 
 func TestDefaultsWhenFileIsMissing(t *testing.T) {
@@ -35,7 +37,7 @@ func TestDefaultsWhenFileIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(cfg.Hosts) != 0 || cfg.PullInterval != 5*time.Minute || cfg.Listen != "127.0.0.1:7878" || !cfg.Login ||
-		cfg.TLSCert != "" || len(cfg.Tiers) != len(store.DefaultTiers) {
+		cfg.TLSCert != "" || len(cfg.Tiers) != len(store.DefaultTiers) || !cfg.LiveViews || cfg.LiveSudo {
 		t.Fatalf("defaults: %+v", cfg)
 	}
 }
@@ -54,6 +56,9 @@ func TestEveryKey(t *testing.T) {
 		cfg.DB != "/srv/mitosu/history.db" || cfg.Listen != "0.0.0.0:8443" || cfg.Login ||
 		strings.Join(cfg.AllowedHosts, ",") != "mitosu.lan" || cfg.TLSCert != "/etc/mitosu/cert.pem" || cfg.TLSKey != "/etc/mitosu/key.pem" {
 		t.Fatalf("got %+v", cfg)
+	}
+	if cfg.LiveViews || !cfg.LiveSudo {
+		t.Fatalf("live views %v sudo %v", cfg.LiveViews, cfg.LiveSudo)
 	}
 	if len(cfg.Tiers) != 3 || cfg.Tiers[0] != want[0] || cfg.Tiers[1] != want[1] || cfg.Tiers[2] != want[2] {
 		t.Fatalf("tiers %+v", cfg.Tiers)
@@ -82,6 +87,7 @@ func TestHomeInPaths(t *testing.T) {
 
 func TestMistakesAreRefusedWithTheirLine(t *testing.T) {
 	cases := map[string]int{
+		"live_sudo = yes\n": 1,
 		"tier = raw 2d\ntier = 1m 1d\ntier = 1h forever\n": 2,
 		"listen = 127.0.0.1:99999\n":                       1,
 		"listen = 127.0.0.1:http\n":                        1,

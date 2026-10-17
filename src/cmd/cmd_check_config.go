@@ -45,11 +45,8 @@ func CmdCheckConfig(ctx context.Context, c *cli.Command) error {
 	for _, h := range cfg.AllowedHosts {
 		fmt.Printf("allowed_host = %s\n", h)
 	}
-	if cfg.Login {
-		fmt.Println("login = on")
-	} else {
-		fmt.Println("login = off")
-	}
+	fmt.Printf("login = %s\n", onOff(cfg.Login))
+	fmt.Printf("live_views = %s\nlive_sudo = %s\n", onOff(cfg.LiveViews), onOff(cfg.LiveSudo))
 	if cfg.TLSCert != "" {
 		fmt.Printf("tls_cert = %s\ntls_key = %s\n", cfg.TLSCert, cfg.TLSKey)
 	}
@@ -119,4 +116,12 @@ func formatDuration(d time.Duration) string {
 		}
 	}
 	return strings.TrimSpace(d.String())
+}
+
+// onOff writes a switch the way the config file does.
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }

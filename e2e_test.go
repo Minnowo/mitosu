@@ -6,9 +6,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +27,9 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"mitosu/src/live"
+	"mitosu/src/ssh"
 )
 
 type e2eServer struct {
@@ -310,6 +315,181 @@ func TestE2EServeWithLogin(t *testing.T) {
 	if !strings.Contains(logs.String(), "Stopped") {
 		t.Fatalf("no clean stop logged:\n%s", logs.String())
 	}
+}
+
+func TestE2ELiveViews(t *testing.T) {
+	srv := testServer(t)
+	get := func(base, path string) (int, map[string]any) {
+		req, err := http.NewRequest("GET", base+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Mitosu", "1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return resp.StatusCode, body
+	}
+
+	// Without sudo: dev is not in adm or systemd-journal.
+	base := startServe(t, srv, "live_sudo = off\n")
+	code, journal := get(base, "/api/live/journal?host=testbox&lines=20")
+	if code != http.StatusOK || journal["partial"] != true {
+		t.Fatalf("journal without sudo: %d %v", code, journal)
+	}
+	code, system := get(base, "/api/live/system?host=testbox")
+	if code != http.StatusOK || !strings.Contains(fmt.Sprint(system["os"]), "Debian") || system["cpus"].(float64) < 1 {
+		t.Fatalf("system: %d %v", code, system)
+	}
+	code, logs := get(base, "/api/live/logs?host=testbox&container=kanshi-testserver")
+	if code != http.StatusBadGateway || !strings.Contains(fmt.Sprint(logs["error"]), "docker is not installed") {
+		t.Fatalf("logs without a docker CLI: %d %v", code, logs)
+	}
+
+	// With sudo (dev may sudo without a password on the test server).
+	base = startServe(t, srv, "live_sudo = on\n")
+	code, journal = get(base, "/api/live/journal?host=testbox&lines=20")
+	if code != http.StatusOK || journal["partial"] != false || len(journal["entries"].([]any)) == 0 {
+		t.Fatalf("journal with sudo: %d %v", code, journal)
+	}
+	code, logins := get(base, "/api/live/logins?host=testbox&lines=200")
+	if code != http.StatusOK || !strings.Contains(fmt.Sprint(logins["logins"]), "result:accepted") {
+		t.Fatalf("logins: %d %v", code, logins)
+	}
+	code, logs = get(base, "/api/live/logs?host=testbox&container=kanshi-testserver")
+	if code != http.StatusBadGateway || !strings.Contains(fmt.Sprint(logs["error"]), "docker is not installed") {
+		t.Fatalf("logs through sudo without a docker CLI: %d %v", code, logs)
+	}
+	code, sudo := get(base, "/api/live/sudo?host=testbox&lines=200")
+	if code != http.StatusOK || !strings.Contains(fmt.Sprint(sudo["entries"]), "journalctl") {
+		t.Fatalf("sudo (mitosu's own sudo journalctl should be there): %d %.300v", code, sudo)
+	}
+}
+
+// TestE2ELocalDocker runs the live container views against this
+// machine's Docker (the test server has no docker CLI): a throwaway
+// container prints 500 numbered lines, the logs view pages back through
+// all of them, and inspect leaves out a planted secret.
+func TestE2ELocalDocker(t *testing.T) {
+	testServer(t)
+	const name = "mitosu-e2e-logs"
+	const image = "node@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4"
+	exec.Command("docker", "rm", "-f", name).Run()
+	out, err := exec.Command("docker", "run", "--name", name, "-e", "SECRET=hunter2", "--network", "none", image,
+		"sh", "-c", "for i in $(seq 1 500); do echo line $i; done").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker run: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", name).Run() })
+
+	ctx := context.Background()
+	r := localRunner{}
+	var got []string
+	before := ""
+	for page := 0; page < 10; page++ {
+		res, err := live.Logs(ctx, r, live.Options{}, "local", name, 200, before)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		var texts []string
+		for _, l := range res.Lines {
+			texts = append(texts, l.Text)
+		}
+		got = append(texts, got...)
+		if res.Older == "" {
+			break
+		}
+		before = res.Older
+	}
+	if len(got) != 500 {
+		t.Fatalf("paged %d lines, want 500", len(got))
+	}
+	for i, text := range got {
+		if text != fmt.Sprintf("line %d", i+1) {
+			t.Fatalf("line %d is %q", i+1, text)
+		}
+	}
+
+	info, err := live.Inspect(ctx, r, live.Options{}, "local", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != name || info.State != "exited" || strings.Contains(string(b), "hunter2") || strings.Contains(string(b), "SECRET") {
+		t.Fatalf("inspect %s", b)
+	}
+}
+
+// localRunner runs live commands with sh on this machine.
+type localRunner struct{}
+
+func (localRunner) Exec(ctx context.Context, host, command string, timeout time.Duration, read func(io.Reader) error) (ssh.ExecResult, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return ssh.ExecResult{}, err
+	}
+	if err := cmd.Start(); err != nil {
+		return ssh.ExecResult{}, err
+	}
+	readErr := read(stdout)
+	io.Copy(io.Discard, stdout)
+	status := 0
+	if err := cmd.Wait(); err != nil {
+		status = -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			status = exitErr.ExitCode()
+		}
+	}
+	return ssh.ExecResult{Status: status, Stderr: stderr.String(), ReadErr: readErr}, nil
+}
+
+// startServe starts mitosu serve for the test server (as host testbox,
+// login off, with extra config lines) until the test ends, and returns its
+// base URL once it has pulled.
+func startServe(t *testing.T, srv e2eServer, extra string) string {
+	t.Helper()
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sshConfig := "Host testbox\n  HostName " + srv.host + "\n  Port " + srv.port + "\n  User " + srv.user +
+		"\n  IdentityFile " + srv.key + "\n  UserKnownHostsFile " + srv.knownHosts + "\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(sshConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	port := freePort(t)
+	conf := filepath.Join(home, "mitosu.conf")
+	text := "host = testbox\npull_interval = 30s\nlisten = 127.0.0.1:" + port + "\nlogin = off\n" + extra
+	if err := os.WriteFile(conf, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "serve", "--config", conf, "--db", filepath.Join(home, "h.db"))
+	cmd.Env = append(os.Environ(), "HOME="+home, "SSH_AUTH_SOCK=", "XDG_CONFIG_HOME=", "XDG_DATA_HOME=")
+	var logs syncBuffer
+	cmd.Stderr = &logs
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	})
+	waitLog(t, &logs, "Pulled")
+	return "http://127.0.0.1:" + port
 }
 
 // freePort returns a TCP port that was free a moment ago.

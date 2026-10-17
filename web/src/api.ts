@@ -69,9 +69,104 @@ export interface Container {
     started_at_ms: number;
 }
 
+export interface LogLine {
+    t: number;
+    /** Docker's own timestamp, the paging cursor. */
+    ts: string;
+    text: string;
+}
+
+export interface LogsResult {
+    lines: LogLine[];
+    /** Cursor for the page before this one, '' for none. */
+    older: string;
+    truncated: boolean;
+}
+
+export interface JournalEntry {
+    t: number;
+    priority: number;
+    unit: string;
+    ident: string;
+    message: string;
+}
+
+export interface JournalResult {
+    entries: JournalEntry[];
+    older: string;
+    partial: boolean;
+    truncated: boolean;
+}
+
+export interface Login {
+    t: number;
+    result: 'accepted' | 'failed' | 'invalid_user';
+    user: string;
+    from: string;
+    method: string;
+}
+
+export interface LoginsResult {
+    logins: Login[];
+    older: string;
+    partial: boolean;
+    truncated: boolean;
+}
+
+export interface SudoEntry {
+    t: number;
+    user: string;
+    run_as: string;
+    dir: string;
+    tty: string;
+    command: string;
+    problem: string;
+}
+
+export interface SudoResult {
+    entries: SudoEntry[];
+    older: string;
+    partial: boolean;
+    truncated: boolean;
+}
+
+export interface SystemInfo {
+    os: string;
+    kernel: string;
+    cpu_model: string;
+    cpus: number;
+    uptime_seconds: number;
+    docker_version: string;
+    updates: {package: string; version: string; from: string}[];
+    reboot_required: boolean;
+    reboot_packages: string[];
+    failed_units: string[];
+}
+
+export interface ContainerInfo {
+    name: string;
+    image: string;
+    image_id: string;
+    created: string;
+    state: string;
+    health: string;
+    started_at: string;
+    finished_at: string;
+    exit_code: number;
+    oom_killed: boolean;
+    restart_count: number;
+    restart_policy: string;
+    project: string;
+    service: string;
+    ports: {container: string; host_ip: string; host_port: string}[];
+    mounts: {type: string; source: string; destination: string; rw: boolean}[];
+    networks: {name: string; ip: string}[];
+}
+
 export interface Session {
     login: boolean;
     logged_in: boolean;
+    live_views: boolean;
 }
 
 /** Thrown when the server answers 401: the UI shows the login form. */
@@ -123,6 +218,15 @@ export const api = {
         }
         return get<ChartData>(`/api/chart?${params.toString()}`);
     },
+
+    liveLogs: (host: string, container: string, lines: number, before: string) =>
+        get<LogsResult>(`/api/live/logs?${q({host, container, lines, before})}`),
+    liveInspect: (host: string, container: string) => get<ContainerInfo>(`/api/live/inspect?${q({host, container})}`),
+    liveJournal: (host: string, unit: string, priority: number, lines: number, before: string) =>
+        get<JournalResult>(`/api/live/journal?${q({host, unit, priority, lines, before})}`),
+    liveLogins: (host: string, lines: number, before: string) => get<LoginsResult>(`/api/live/logins?${q({host, lines, before})}`),
+    liveSudo: (host: string, lines: number, before: string) => get<SudoResult>(`/api/live/sudo?${q({host, lines, before})}`),
+    liveSystem: (host: string) => get<SystemInfo>(`/api/live/system?${q({host})}`),
 
     /** Logs in; resolves to an error message, or '' on success. */
     async login(password: string): Promise<string> {
