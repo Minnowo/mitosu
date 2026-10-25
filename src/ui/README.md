@@ -1,23 +1,16 @@
 # mitosu web UI
 
-Preact + TypeScript, built with Vite and Tailwind 4, charts by uPlot. The
-build (src/ui/dist) is embedded in the mitosu binary by src/ui/embed.go;
-it is not committed, so build it before `go build`:
+The UI usese TypeScript Preact with Tailwind 4.
+It's embedded into the final build and not in source control
+so it's required to be built at least once before building the go binary.
 
+Since I don't trust npm / Node, this project is setup to run them inside a Docker image.
+If you don't care about this you can forgo the build script and run `npm build` directly.
+
+Otherwise you can build the UI using the script:
 ```
 scripts/web.sh        # or: make web
 ```
-
-npm only runs inside a pinned Debian Node image (node:26-trixie-slim, by
-digest, in scripts/web.sh); nothing is installed on the host. It installs
-(with the network, install scripts off) only when package.json or the
-lock file changed, and builds without the network. scripts/check-npm.sh
-(run by check.sh) fails unless the direct packages are exactly
-scripts/approved-npm.txt and every locked package comes from
-registry.npmjs.org with an integrity hash.
-`scripts/web.sh npm <args>` runs any other npm command the same way.
-
-Only preact and uplot end up in the page; the rest are build tools.
 
 ## Files
 
@@ -35,9 +28,4 @@ Only preact and uplot end up in the page; the rest are build tools.
 
 ## Theme
 
-src/theme.css was generated once with ponkotsu-css
-(github.com/Minnowo/ponkotsu-css, commit 7141d05, its default
-src/seeds.json) by `npm run generate` in the same Node image, and is
-committed as is. To change the colors, edit ponkotsu's seeds.json,
-generate again and replace the file. Markup follows ponkotsu's SKILL.md:
-elements by meaning, classes only for layout and variants.
+Theme is generated from [ponkotsu-css](github.com/Minnowo/ponkotsu-css)
