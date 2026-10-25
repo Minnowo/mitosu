@@ -13,8 +13,7 @@ server, mitosu pulls them into a long-term history and shows them.
   kept SSH connection each, stores the history in SQLite with
   configurable downsampling (default: every sample for 30 days, 1-minute
   buckets for a year, 1-hour buckets forever), and serves a web UI on
-  127.0.0.1:7878. Runs in the foreground anywhere: shell, systemd
-  (deploy/mitosu.service), Docker (deploy/Dockerfile).
+  127.0.0.1:7878. Runs in the foreground anywhere.
 - Web UI: an overview of every server with what needs attention, charts
   from 1 hour to 1 year (gaps and stale data shown), containers, events,
   and live views (container logs and configuration, journal, SSH logins,

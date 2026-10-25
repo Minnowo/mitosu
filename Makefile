@@ -47,29 +47,3 @@ test-verbose: format web
 test-clean: format web
 	go clean -testcache
 
-
-# Releases embed the web UI: build it first (goreleaser checks it is there).
-.PHONY: release
-release: web
-	docker build -t mitosu:build -f docker/Dockerfile.build docker
-	docker run \
-		--rm \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v $$PWD:/work \
-		-w /work \
-		mitosu:build \
-		release --skip=validate --clean --snapshot
-
-
-.PHONY: release-github
-release-github: web
-	docker build -t mitosu:build -f docker/Dockerfile.build docker
-	docker run \
-		--rm \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v $$PWD:/work \
-		-e GITHUB_TOKEN=$$GITHUB_TOKEN \
-		-w /work \
-		mitosu:build \
-		release --skip=validate --clean
-

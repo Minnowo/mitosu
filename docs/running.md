@@ -10,7 +10,7 @@ directory for the database.
 1. Make sure `ssh myserver kanshi version` works without a prompt (the
    host key is known and the key needs no passphrase, or is in an
    ssh-agent).
-2. Copy `deploy/mitosu.conf` to `~/.config/mitosu/mitosu.conf` and set
+2. Copy `docs/mitosu.conf` to `~/.config/mitosu/mitosu.conf` and set
    `host = myserver`. `mitosu check-config` shows what serve will use.
 3. Set the web UI password: `mitosu passwd` (or `login = off` in the
    config, or `--no-login`, to go without one).
@@ -56,10 +56,6 @@ mitosu serve
 
 The log says where the web UI listens (by default http://127.0.0.1:7878).
 
-## With systemd (user service)
-
-`deploy/mitosu.service` is an example unit; its header has the commands.
-
 ## On another machine than the browser
 
 Set `listen` to an address the browser can reach and add the name the
@@ -67,20 +63,3 @@ browser uses as `allowed_host`. mitosu speaks plain HTTP unless
 `tls_cert` and `tls_key` are set; over a network you do not trust, use
 TLS, a WireGuard tunnel or a reverse proxy that adds TLS. Keep login on.
 
-## Docker
-
-`deploy/Dockerfile` builds an image (web UI, static binary, Debian slim,
-running as an unprivileged user); its header has the build and run
-commands. In the container:
-
-- `~/.ssh` is mounted read-only at /home/mitosu/.ssh: its config, the
-  servers' host keys in known_hosts, and keys that need no passphrase
-  (or mount an ssh-agent socket). IdentityFile paths in that config must
-  be the container's paths (/home/mitosu/.ssh/...).
-- The config needs `listen = 0.0.0.0:7878` so the published port
-  reaches it; publish it on 127.0.0.1 (`-p 127.0.0.1:7878:7878`) unless
-  you mean to expose it.
-- The history lives in a volume at /data (`--db /data/mitosu.db`).
-
-Checked on 2026-10-17 against kanshi's test server: the container pulled
-it and wrote its database 0600 as user mitosu.

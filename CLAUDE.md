@@ -252,7 +252,7 @@ variables scripts/e2e.sh sets, and that script fails on any skip.
 ### Language notes
 
 - Go (version in go.mod), CGO_ENABLED=0: the binary must stay static and
-  cross-compile for every target in .goreleaser.yaml.
+  cross-compile for every target scripts/check.sh builds.
 - Approved direct dependencies only (scripts/approved-deps.txt).
 - Errors: return `error`, wrap with `fmt.Errorf("...: %w", err)`; no
   `panic` and no ignored errors outside tests.

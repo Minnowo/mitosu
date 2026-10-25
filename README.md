@@ -66,7 +66,7 @@ and sudo uses, OS and hardware facts, upgradable packages (from the
 existing package lists; mitosu never runs `apt update`), whether a
 reboot is required, and failed systemd units. See docs/running.md for
 the groups or `live_sudo` they need. See [docs/running.md](docs/running.md)
-and the commented [deploy/mitosu.conf](deploy/mitosu.conf);
+and the commented [docs/mitosu.conf](docs/mitosu.conf);
 `mitosu check-config` shows the settings in effect.
 
 mitosu writes only the database and the password file next to it, and
