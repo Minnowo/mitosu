@@ -21,8 +21,8 @@ import (
 	"mitosu/src/scheduler"
 	"mitosu/src/ssh"
 	"mitosu/src/store"
+	"mitosu/src/ui"
 	"mitosu/src/web"
-	webui "mitosu/web"
 )
 
 // CmdServe loads the config (--config), opens the history database, pulls
@@ -63,14 +63,14 @@ func CmdServe(ctx context.Context, c *cli.Command) error {
 	}()
 
 	sched := scheduler.New(db, cfg.Hosts, cfg.Tiers, cfg.PullInterval, connectHost, pull.Pull)
-	ui, err := webui.Files()
+	uiFiles, err := ui.Files()
 	if err != nil {
 		return err
 	}
 	server := web.New(db, sched, web.Options{
 		Listen: cfg.Listen, AllowedHosts: cfg.AllowedHosts, Verifier: verifier,
 		TLSCert: cfg.TLSCert, TLSKey: cfg.TLSKey, Tiers: cfg.Tiers,
-		PullInterval: cfg.PullInterval, UI: ui,
+		PullInterval: cfg.PullInterval, UI: uiFiles,
 		LiveViews: cfg.LiveViews, Live: sched, LiveOptions: live.Options{Sudo: cfg.LiveSudo},
 	})
 

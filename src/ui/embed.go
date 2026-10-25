@@ -1,8 +1,8 @@
-// The built web UI (web/dist, made by `make web`), embedded in the
+// The built web UI (src/ui/dist, made by `make web`), embedded in the
 // binary so mitosu serve needs no files beside it. The Go build fails
 // with "pattern dist: no matching files found" until the UI is built.
 
-package webui
+package ui
 
 import (
 	"embed"

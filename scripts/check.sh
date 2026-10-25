@@ -22,7 +22,7 @@ step() {
 }
 
 step "web UI (type check and build; npm runs in Docker, see scripts/web.sh)"
-# The Go build embeds web/dist, so it comes first.
+# The Go build embeds src/ui/dist, so it comes first.
 web_log="$(mktemp)"
 scripts/web.sh >"$web_log" 2>&1 || {
     cat "$web_log" >&2

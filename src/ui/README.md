@@ -1,8 +1,8 @@
 # mitosu web UI
 
 Preact + TypeScript, built with Vite and Tailwind 4, charts by uPlot. The
-build (web/dist) is embedded in the mitosu binary by web/embed.go; it is
-not committed, so build it before `go build`:
+build (src/ui/dist) is embedded in the mitosu binary by src/ui/embed.go;
+it is not committed, so build it before `go build`:
 
 ```
 scripts/web.sh        # or: make web

@@ -219,17 +219,17 @@ src/<package>/     one directory per package; allowed imports between
 docs/brief.md      approved brief (source of truth)
 docs/reference/    downloaded specs
 scripts/check.sh   the one check; approved-deps.txt, layers.txt feed it
-web/               the web UI (Preact, TypeScript; web/README.md); npm runs
-                   in Docker only, through scripts/web.sh
+src/ui/            the web UI (Preact, TypeScript; src/ui/README.md); npm
+                   runs in Docker only, through scripts/web.sh
 ```
 
 ### Commands
 
 ```
 check:  scripts/check.sh   (web UI build, gofmt, go vet, tests with -race, static build, rules)
-web:    scripts/web.sh     (npm in a pinned Node image; the Go build embeds web/dist)
+web:    scripts/web.sh     (npm in a pinned Node image; the Go build embeds src/ui/dist)
 build:  make build         (scripts/web.sh, then CGO_ENABLED=0 go build -trimpath)
-test:   go test ./...      (after scripts/web.sh: the build embeds web/dist)
+test:   go test ./...      (after scripts/web.sh: the build embeds src/ui/dist)
 e2e:    scripts/e2e.sh     (TestE2E* over real SSH against kanshi's test server)
 ```
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Builds the web UI (web/ -> web/dist) with npm inside a pinned Debian
+# Builds the web UI (src/ui/ -> src/ui/dist) with npm inside a pinned Debian
 # Node image, as the user's projects do: nothing is installed on the host.
 # Inside a container (/.dockerenv) it runs npm directly.
 #   scripts/web.sh          npm ci when needed, then type check and build
-#   scripts/web.sh npm ...  run any npm command in web/
+#   scripts/web.sh npm ...  run any npm command in src/ui/
 
 set -euo pipefail
 
-cd "$(dirname "$0")/../web"
+cd "$(dirname "$0")/../src/ui"
 
 # node:26-trixie-slim, pinned 2026-10-17.
 NODE_IMAGE="node@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4"
 
-# npm_run NETWORK ARGS...: npm ARGS in web/, with the network (host) or
+# npm_run NETWORK ARGS...: npm ARGS in src/ui/, with the network (host) or
 # without it (none).
 npm_run() {
     local network="$1"

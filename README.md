@@ -85,7 +85,7 @@ over the config's `db` line.
 ## Building
 
 The web UI is embedded in the binary; build it first (npm runs inside
-Docker, see web/README.md):
+Docker, see src/ui/README.md):
 
 ```
 make build      # scripts/web.sh, then go build

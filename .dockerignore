@@ -1,5 +1,5 @@
 .git
-web/node_modules
-web/dist
+src/ui/node_modules
+src/ui/dist
 mitosu
 *.db

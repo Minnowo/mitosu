@@ -1,4 +1,4 @@
-// Build for the web UI embedded in the mitosu binary (web/embed.go).
+// Build for the web UI embedded in the mitosu binary (src/ui/embed.go).
 import {defineConfig} from 'vite';
 import preact from '@preact/preset-vite';
 import tailwindcss from '@tailwindcss/vite';

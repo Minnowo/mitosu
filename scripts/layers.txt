@@ -3,14 +3,14 @@
 # import higher ones. scripts/check.sh fails on an import not listed here
 # and on a package with no line.
 .: src/cmd src/data src/logger
-src/cmd: web src/auth src/config src/data src/display src/kanshi src/live src/pull src/scheduler src/shell src/ssh src/store src/web
+src/cmd: src/auth src/config src/data src/display src/kanshi src/live src/pull src/scheduler src/shell src/ssh src/store src/ui src/web
 src/pull: src/kanshi src/ssh src/store
 src/config: src/ssh src/store
 src/scheduler: src/pull src/ssh src/store
 src/problems: src/store
 src/live: src/kanshi src/ssh
 src/web: src/auth src/live src/problems src/scheduler src/store
-web:
+src/ui:
 src/store: src/kanshi
 src/kanshi:
 src/auth:

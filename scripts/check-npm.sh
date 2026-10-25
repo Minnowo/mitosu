@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks web/package.json and web/package-lock.json: the direct packages
+# Checks src/ui/package.json and src/ui/package-lock.json: the direct packages
 # are exactly scripts/approved-npm.txt (name@version), and every locked
 # package comes from registry.npmjs.org with an integrity hash.
 
@@ -14,18 +14,18 @@ for line in open("scripts/approved-npm.txt"):
     line = line.strip()
     if line and not line.startswith("#"):
         approved.add(line)
-pkg = json.load(open("web/package.json"))
+pkg = json.load(open("src/ui/package.json"))
 direct = set()
 for section in ("dependencies", "devDependencies"):
     for name, version in pkg.get(section, {}).items():
         direct.add(f"{name}@{version}")
 for extra in ("peerDependencies", "optionalDependencies", "bundleDependencies"):
     if pkg.get(extra):
-        sys.exit(f"check-npm: web/package.json has {extra}")
+        sys.exit(f"check-npm: src/ui/package.json has {extra}")
 if direct != approved:
-    sys.exit(f"check-npm: web/package.json differs from scripts/approved-npm.txt: "
+    sys.exit(f"check-npm: src/ui/package.json differs from scripts/approved-npm.txt: "
              f"not approved {sorted(direct - approved)}, missing {sorted(approved - direct)}")
-lock = json.load(open("web/package-lock.json"))
+lock = json.load(open("src/ui/package-lock.json"))
 for path, entry in lock.get("packages", {}).items():
     if path == "":
         continue
