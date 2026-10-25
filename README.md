@@ -126,7 +126,7 @@ gives up after 30 s; otherwise it waits, since you may be typing a
 password.
 
 
-![Example output](./pic/stats-all.png)
+![Example output](./docs/pic/stats-all.png)
 
 
 
